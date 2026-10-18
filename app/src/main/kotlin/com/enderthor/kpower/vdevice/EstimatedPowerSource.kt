@@ -36,12 +36,8 @@ class EstimatedPowerSource(
     private var currentRandomPower = 150.0  // Valor inicial
     private val randomPowerUpdateInterval = 5000L  // Cambiar
 
-    private val coastDetector = CoastDetector()
-    @Volatile private var gearDetector: GearDetector? = null
-    private var gearDetectorConfig: Pair<Int, List<Double>>? = null
+    private val pipeline = PowerPipeline()
     private val calibrationMutex = Mutex()
-    private var lastSpeedSourceId: String? = null
-    private var lastCadenceSourceId: String? = null
 
     private fun getRandomPower(): Double {
         val currentTime = System.currentTimeMillis()
@@ -75,8 +71,6 @@ class EstimatedPowerSource(
 
                 val userProfile = karooSystem.consumerFlow<UserProfile>().first()
                 val (userMass, factorMass, factorDistance, factorElevation) = getUserProfileFactors(userProfile)
-                val accelerationTracker = AccelerationTracker()
-                val coastTracker = AccelerationTracker(AccelerationTracker.COAST_WINDOW_MS)
 
                 val calibrationFlow = context.loadCalibrationFlow()
                     .catch { e ->
@@ -168,21 +162,27 @@ class EstimatedPowerSource(
                 }.throttle(900L)
                     .collect { (karooValues, configs) ->
                         if (configs.isNotEmpty()) {
-                            val powerBike = calculatePowerBike(
-                                userMass,
-                                factorMass,
-                                factorDistance,
-                                factorElevation,
-                                configs,
-                                karooValues,
-                                accelerationTracker,
-                                coastTracker,
-                                calibrationFlow.value,
-                                speedSensorIdsFlow.value,
-                                gearCheckFlow.value
+                            val speed = karooValues.speed as? StreamState.Streaming
+                            val cadence = karooValues.cadence as? StreamState.Streaming
+                            val powerValue = pipeline.update(
+                                PowerInputs(
+                                    speed = speed?.let { karooValues.speed.getValueOrDefault() * factorDistance },
+                                    speedSourceId = speed?.dataPoint?.sourceId,
+                                    cadence = cadence?.let { karooValues.cadence.getValueOrDefault() },
+                                    cadenceSourceId = cadence?.dataPoint?.sourceId,
+                                    slope = karooValues.slope.getValueOrDefault() / 100,
+                                    elevation = karooValues.elevation.getValueOrDefault() * factorElevation,
+                                    headwind = karooValues.headwind.getValueOrDefault(),
+                                ),
+                                PowerSetup(
+                                    config = configs[0],
+                                    riderMass = userMass,
+                                    massFactor = factorMass,
+                                    calibrations = calibrationFlow.value,
+                                    speedSensorIds = speedSensorIdsFlow.value,
+                                    gearChecks = gearCheckFlow.value,
+                                )
                             )
-
-                            val powerValue = powerBike.calculateCyclingWattage()
                             //val powerValue = getRandomPower()
                             emitter.onNext(
                                 OnDataPoint(
@@ -219,130 +219,8 @@ class EstimatedPowerSource(
         }
     }
 
-    private fun calculatePowerBike(
-        userMass: Double,
-        factorMass: Double,
-        factorDistance: Double,
-        factorElevation: Double,
-        powerConfigs: List<ConfigData>,
-        values: RealKarooValues,
-        accelerationTracker: AccelerationTracker,
-        coastTracker: AccelerationTracker,
-        calibrations: Map<String, CoastCalibration>,
-        speedSensorIds: Set<String>,
-        gearChecks: Map<String, GearCheck>
-    ): CyclingWattageEstimator {
-        val speed = values.speed.getValueOrDefault()
-        val speedMs = speed * factorDistance
-
-        // The Karoo falls back to GPS speed while the wheel sensor is quiet (and back again); the two
-        // disagree, so a slope across the switch would be a phantom acceleration
-        val speedSourceId = (values.speed as? StreamState.Streaming)?.dataPoint?.sourceId
-        val cadenceSourceId = (values.cadence as? StreamState.Streaming)?.dataPoint?.sourceId
-        if (speedSourceId != lastSpeedSourceId || cadenceSourceId != lastCadenceSourceId) {
-            Timber.i("Sources: speed=$speedSourceId cadence=$cadenceSourceId")
-            if (speedSourceId != lastSpeedSourceId) {
-                accelerationTracker.reset()
-                coastTracker.reset()
-            }
-            lastSpeedSourceId = speedSourceId
-            lastCadenceSourceId = cadenceSourceId
-        }
-
-        val acceleration: Double
-        val coastAcceleration: Double
-        if (values.speed is StreamState.Streaming) {
-            acceleration = accelerationTracker.update(speedMs)
-            coastAcceleration = coastTracker.update(speedMs)
-        } else {
-            accelerationTracker.reset()
-            coastTracker.reset()
-            acceleration = 0.0
-            coastAcceleration = 0.0
-        }
-
-        val slope = values.slope.getValueOrDefault()
-        val elevation = values.elevation.getValueOrDefault()
-        val finalHeadwind = values.headwind.getValueOrDefault()
-
-        var cadence = 0.0
-        var isforcepower = !powerConfigs[0].useCadenceSensor
-
-        if( values.cadence is StreamState.Streaming) cadence = values.cadence.getValueOrDefault()
-        else isforcepower = true
-
-
-        val config = powerConfigs[0]
-        val totalMass = (userMass + config.bikeMass.toDoubleLocale()) * factorMass
-        val calibration = if (config.autoCalibrate) calibrations[config.calibrationKey] else null
-        val cdA = calibration?.cdA ?: (config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale())
-        val crr = calibration?.crr ?: config.rollingResistanceCoefficient.toDoubleLocale()
-
-        if (config.autoCalibrate) {
-            coastDetector.update(
-                CoastDetector.Input(
-                    configKey = config.calibrationKey,
-                    useCadenceSensor = config.useCadenceSensor,
-                    cadence = if (values.cadence is StreamState.Streaming) cadence else null,
-                    isWheelSpeed = isWheelSpeedSource(speedSourceId, speedSensorIds),
-                    speed = speedMs,
-                    meanSpeed = coastTracker.windowMeanSpeed,
-                    acceleration = coastAcceleration,
-                    slope = slope / 100,
-                    headwind = finalHeadwind,
-                    elevation = elevation * factorElevation,
-                    totalMass = totalMass,
-                    cdA = cdA,
-                    crrEff = crr * config.surface.factor,
-                )
-            )
-        }
-
-        // Pedals driving the wheel through one of the entered gears: the rider is pushing, so a
-        // 0 W estimate (grade noise on a descent) is wrong and the reading keeps a floor
-        val ratios = config.gearRatios()
-        val drivingGear = if (ratios.isNotEmpty() && config.useCadenceSensor && values.cadence is StreamState.Streaming) {
-            gearDetectorFor(config.id, ratios, gearChecks)
-                .update(speedMs, cadence, isWheelSpeedSource(speedSourceId, speedSensorIds))
-        } else false
-        val minPower = if (drivingGear) config.pedallingFloor.toDoubleLocale() else 0.0
-
-        //Timber.w("VALUES  Speed: $speed, Cadence: $cadence, Slope: $slope, Elevation: $elevation, Headwind: $finalHeadwind")
-
-        return CyclingWattageEstimator(
-            slope = slope / 100,
-            totalMass = totalMass,
-            rollingResistanceCoefficient = crr,
-            // A learned CdA replaces Cd × frontal area
-            dragCoefficient = calibration?.cdA ?: config.dragCoefficient.toDoubleLocale(),
-            speed = speedMs,
-            elevation = elevation * factorElevation,
-            windSpeed = finalHeadwind,
-            powerLoss = powerConfigs[0].powerLoss.toDoubleLocale() / 100,
-            frontalArea = if (calibration != null) 1.0 else config.frontalArea.toDoubleLocale(),
-            ftp = powerConfigs[0].ftp.toDoubleLocale(),
-            cadence = cadence,
-            surface = powerConfigs[0].surface.factor,
-            isforcepower = isforcepower,
-            acceleration = acceleration,
-            minPower = minPower
-        )
-    }
-
-    private fun gearDetectorFor(configId: Int, ratios: List<Double>, gearChecks: Map<String, GearCheck>): GearDetector {
-        val existing = gearDetector
-        if (existing != null && gearDetectorConfig == configId to ratios) return existing
-        val circumference = gearChecks[configId.toString()]?.circumference ?: GearDetector.DEFAULT_CIRCUMFERENCE
-        Timber.i("Gear detector: ${ratios.size} gears, wheel ${circumference} m")
-        return GearDetector(ratios, circumference).also {
-            gearDetector = it
-            gearDetectorConfig = configId to ratios
-        }
-    }
-
     private suspend fun commitGearCheck() {
-        val configId = gearDetectorConfig?.first ?: return
-        val check = gearDetector?.takeCheck() ?: return
+        val (configId, check) = pipeline.takeGearCheck() ?: return
         Timber.i("Gear check: $check")
         saveGearCheck(context, configId, check)
     }
@@ -350,7 +228,7 @@ class EstimatedPowerSource(
 
     private suspend fun commitCalibration(configs: List<ConfigData>) {
         calibrationMutex.withLock {
-            val batch = coastDetector.drain() ?: return
+            val batch = pipeline.coastDetector.drain() ?: return
             val config = configs.find { it.calibrationKey == batch.configKey } ?: return
             if (!config.autoCalibrate) return
 
@@ -368,7 +246,6 @@ class EstimatedPowerSource(
                 context.loadCalibrationFlow().first()[key],
                 fit,
                 configCdA = config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale(),
-                configCrr = crr
             )
             Timber.i("Coast calibration: fit CdA ${fit.cdA} from ${fit.samples}/${samples.size} samples -> $updated")
             saveCalibration(context, key, updated)
