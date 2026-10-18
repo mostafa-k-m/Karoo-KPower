@@ -3,6 +3,8 @@ package com.enderthor.kpower.vdevice
 import com.enderthor.kpower.data.CoastCalibration
 import com.enderthor.kpower.data.KarooSurface
 import com.enderthor.kpower.data.previewConfigData
+import io.hammerhead.karooext.models.DataType
+import io.hammerhead.karooext.models.SavedDevices
 import com.enderthor.kpower.vdevice.CyclingWattageEstimator.Companion.DYNAMIC_ROLLING_FORCE_N
 import com.enderthor.kpower.vdevice.CyclingWattageEstimator.Companion.GRAVITY
 import com.enderthor.kpower.vdevice.CyclingWattageEstimator.Companion.ROTATING_MASS_KG
@@ -298,10 +300,25 @@ class CoastCalibrationTest {
         assertTrue(summer.calibrationKey != summer.copy(surface = KarooSurface.STANDARD).calibrationKey)
     }
 
+    // Ids as logged on a Karoo 3 with ANT+ speed and cadence sensors
+    private fun device(id: String, vararg types: String, enabled: Boolean = true) =
+        SavedDevices.SavedDevice(id, "ANT_PLUS", id, enabled, SavedDevices.SavedDevice.DeviceDetail(null, null, null, null), emptyMap(), types.toList(), null)
+
     @Test
     fun wheelSpeedSource() {
-        assertTrue(EstimatedPowerSource.isWheelSpeedSource("ant-speed-12345"))
-        assertTrue(!EstimatedPowerSource.isWheelSpeedSource(null))
-        assertTrue(!EstimatedPowerSource.isWheelSpeedSource("GPS"))
+        val ids = EstimatedPowerSource.speedSensorIds(
+            listOf(
+                device("kpower::estimated-power-2000", DataType.Source.POWER),
+                device("22222-222-1", DataType.Source.CADENCE),
+                device("11111-111-1", DataType.Source.SPEED, "TYPE_SPD_DISTANCE_DIFF_ID"),
+                device("5555-1-1", DataType.Source.SPEED, enabled = false),
+                device("trainer-1", DataType.Source.SPEED, DataType.Source.POWER),
+            )
+        )
+        assertEquals(setOf("11111-111-1"), ids)
+        assertTrue(EstimatedPowerSource.isWheelSpeedSource("11111-111-1", ids))
+        assertTrue(!EstimatedPowerSource.isWheelSpeedSource("DEVICE_LOCATION_ID", ids))
+        assertTrue(!EstimatedPowerSource.isWheelSpeedSource(null, ids))
+        assertTrue(!EstimatedPowerSource.isWheelSpeedSource("11111-111-1", emptySet()))
     }
 }

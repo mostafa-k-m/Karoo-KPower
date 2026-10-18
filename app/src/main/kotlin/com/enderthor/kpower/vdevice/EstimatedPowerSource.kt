@@ -38,6 +38,7 @@ class EstimatedPowerSource(
     private val coastDetector = CoastDetector()
     private val calibrationMutex = Mutex()
     private var lastSpeedSourceId: String? = null
+    private var lastCadenceSourceId: String? = null
 
     private fun getRandomPower(): Double {
         val currentTime = System.currentTimeMillis()
@@ -95,6 +96,20 @@ class EstimatedPowerSource(
                         initialValue = previewConfigData
                     )
 
+                // Sensor data points carry the sensor's SavedDevice id as sourceId; GPS speed comes as DEVICE_LOCATION_ID
+                val speedSensorIdsFlow = karooSystem.consumerFlow<SavedDevices>()
+                    .map { saved -> speedSensorIds(saved.devices) }
+                    .onEach { Timber.i("Speed sensors: $it") }
+                    .catch { e ->
+                        Timber.e(e, "Error loading saved devices")
+                        emit(emptySet())
+                    }
+                    .stateIn(
+                        scope = scope,
+                        started = SharingStarted.Eagerly,
+                        initialValue = emptySet()
+                    )
+
                 // Fit the coasting samples once a ride ends
                 scope.launch {
                     var wasRiding = false
@@ -143,7 +158,8 @@ class EstimatedPowerSource(
                                 configs,
                                 karooValues,
                                 accelerationTracker,
-                                calibrationFlow.value
+                                calibrationFlow.value,
+                                speedSensorIdsFlow.value
                             )
 
                             val powerValue = powerBike.calculateCyclingWattage()
@@ -190,7 +206,8 @@ class EstimatedPowerSource(
         powerConfigs: List<ConfigData>,
         values: RealKarooValues,
         accelerationTracker: AccelerationTracker,
-        calibrations: Map<String, CoastCalibration>
+        calibrations: Map<String, CoastCalibration>,
+        speedSensorIds: Set<String>
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
         val speedMs = speed * factorDistance
@@ -219,18 +236,21 @@ class EstimatedPowerSource(
         val cdA = calibration?.cdA ?: (config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale())
         val crr = calibration?.crr ?: config.rollingResistanceCoefficient.toDoubleLocale()
 
+        val speedSourceId = (values.speed as? StreamState.Streaming)?.dataPoint?.sourceId
+        val cadenceSourceId = (values.cadence as? StreamState.Streaming)?.dataPoint?.sourceId
+        if (speedSourceId != lastSpeedSourceId || cadenceSourceId != lastCadenceSourceId) {
+            Timber.i("Sources: speed=$speedSourceId cadence=$cadenceSourceId")
+            lastSpeedSourceId = speedSourceId
+            lastCadenceSourceId = cadenceSourceId
+        }
+
         if (config.autoCalibrate) {
-            val speedSourceId = (values.speed as? StreamState.Streaming)?.dataPoint?.sourceId
-            if (speedSourceId != lastSpeedSourceId) {
-                Timber.i("Speed source: $speedSourceId")
-                lastSpeedSourceId = speedSourceId
-            }
             coastDetector.update(
                 CoastDetector.Input(
                     configKey = config.calibrationKey,
                     useCadenceSensor = config.useCadenceSensor,
                     cadence = if (values.cadence is StreamState.Streaming) cadence else null,
-                    isWheelSpeed = isWheelSpeedSource(speedSourceId),
+                    isWheelSpeed = isWheelSpeedSource(speedSourceId, speedSensorIds),
                     speed = speedMs,
                     meanSpeed = accelerationTracker.windowMeanSpeed,
                     acceleration = acceleration,
@@ -298,8 +318,14 @@ class EstimatedPowerSource(
         private const val MAX_PENDING_SAMPLES = 1000
 
         // Without a speed sensor the Karoo derives speed from GPS, which is too coarse to see deceleration
-        fun isWheelSpeedSource(sourceId: String?): Boolean =
-            !sourceId.isNullOrBlank() && !sourceId.contains("gps", ignoreCase = true)
+        fun isWheelSpeedSource(sourceId: String?, speedSensorIds: Set<String>): Boolean =
+            sourceId != null && sourceId in speedSensorIds
+
+        // Enabled speed sensors; a device that also measures power is a trainer, whose speed isn't road physics
+        fun speedSensorIds(devices: List<SavedDevices.SavedDevice>): Set<String> =
+            devices.filter {
+                it.enabled && DataType.Source.SPEED in it.supportedDataTypes && DataType.Source.POWER !in it.supportedDataTypes
+            }.map { it.id }.toSet()
 
         fun fromUid(extension: String, uid: String, karooSystem: KarooSystemService, context: Context): EstimatedPowerSource? {
             return uid.substringAfterLast("-").toIntOrNull()?.let {
