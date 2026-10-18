@@ -12,6 +12,7 @@ class CyclingWattageEstimatorTest {
         isforcepower: Boolean = false,
         acceleration: Double = 0.0,
         ftp: Double = 300.0,
+        minPower: Double = 0.0,
     ) = CyclingWattageEstimator(
         slope = slope,
         totalMass = 100.0,
@@ -27,6 +28,7 @@ class CyclingWattageEstimatorTest {
         surface = 1.0,
         isforcepower = isforcepower,
         acceleration = acceleration,
+        minPower = minPower,
     )
 
     @Test
@@ -72,6 +74,14 @@ class CyclingWattageEstimatorTest {
     fun lowCadenceIgnoredWithoutCadenceSensor() {
         val power = estimator(cadence = 0.0, isforcepower = true).calculateCyclingWattage()
         assertEquals(estimator().calculateCyclingWattage(), power, 1e-6)
+    }
+
+    @Test
+    fun floorWhileAGearDrivesTheWheel() {
+        assertEquals(30.0, estimator(slope = -0.05, minPower = 30.0).calculateCyclingWattage(), 0.0)
+        // Above the floor nothing changes, and below 22 rpm it's still 0 W
+        assertEquals(estimator().calculateCyclingWattage(), estimator(minPower = 30.0).calculateCyclingWattage(), 1e-9)
+        assertEquals(0.0, estimator(cadence = 10.0, minPower = 30.0).calculateCyclingWattage(), 0.0)
     }
 
     @Test

@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
 import com.enderthor.kpower.data.CoastCalibration
 import com.enderthor.kpower.data.ConfigData
+import com.enderthor.kpower.data.GearCheck
 import com.enderthor.kpower.data.RealKarooValues
 import com.enderthor.kpower.data.previewConfigData
 import com.enderthor.kpower.extension.*
@@ -36,6 +37,8 @@ class EstimatedPowerSource(
     private val randomPowerUpdateInterval = 5000L  // Cambiar
 
     private val coastDetector = CoastDetector()
+    @Volatile private var gearDetector: GearDetector? = null
+    private var gearDetectorConfig: Pair<Int, List<Double>>? = null
     private val calibrationMutex = Mutex()
     private var lastSpeedSourceId: String? = null
     private var lastCadenceSourceId: String? = null
@@ -86,6 +89,17 @@ class EstimatedPowerSource(
                         initialValue = emptyMap()
                     )
 
+                val gearCheckFlow = context.loadGearCheckFlow()
+                    .catch { e ->
+                        Timber.e(e, "Error loading gear check")
+                        emit(emptyMap())
+                    }
+                    .stateIn(
+                        scope = scope,
+                        started = SharingStarted.Eagerly,
+                        initialValue = emptyMap()
+                    )
+
                 val powerConfigFlow = context.loadPreferencesFlow()
                     .catch { e ->
                         Timber.e(e, "Error loading power configs")
@@ -115,7 +129,10 @@ class EstimatedPowerSource(
                 scope.launch {
                     var wasRiding = false
                     karooSystem.consumerFlow<RideState>().collect { state ->
-                        if (state is RideState.Idle && wasRiding) commitCalibration(powerConfigFlow.value)
+                        if (state is RideState.Idle && wasRiding) {
+                            commitCalibration(powerConfigFlow.value)
+                            commitGearCheck()
+                        }
                         wasRiding = state !is RideState.Idle
                     }
                 }
@@ -161,7 +178,8 @@ class EstimatedPowerSource(
                                 accelerationTracker,
                                 coastTracker,
                                 calibrationFlow.value,
-                                speedSensorIdsFlow.value
+                                speedSensorIdsFlow.value,
+                                gearCheckFlow.value
                             )
 
                             val powerValue = powerBike.calculateCyclingWattage()
@@ -193,6 +211,7 @@ class EstimatedPowerSource(
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     commitCalibration(context.loadPreferencesFlow().first())
+                    commitGearCheck()
                 } catch (e: Exception) {
                     Timber.e(e, "Error saving coast calibration")
                 }
@@ -210,7 +229,8 @@ class EstimatedPowerSource(
         accelerationTracker: AccelerationTracker,
         coastTracker: AccelerationTracker,
         calibrations: Map<String, CoastCalibration>,
-        speedSensorIds: Set<String>
+        speedSensorIds: Set<String>,
+        gearChecks: Map<String, GearCheck>
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
         val speedMs = speed * factorDistance
@@ -278,6 +298,15 @@ class EstimatedPowerSource(
             )
         }
 
+        // Pedals driving the wheel through one of the entered gears: the rider is pushing, so a
+        // 0 W estimate (grade noise on a descent) is wrong and the reading keeps a floor
+        val ratios = config.gearRatios()
+        val drivingGear = if (ratios.isNotEmpty() && config.useCadenceSensor && values.cadence is StreamState.Streaming) {
+            gearDetectorFor(config.id, ratios, gearChecks)
+                .update(speedMs, cadence, isWheelSpeedSource(speedSourceId, speedSensorIds))
+        } else false
+        val minPower = if (drivingGear) config.pedallingFloor.toDoubleLocale() else 0.0
+
         //Timber.w("VALUES  Speed: $speed, Cadence: $cadence, Slope: $slope, Elevation: $elevation, Headwind: $finalHeadwind")
 
         return CyclingWattageEstimator(
@@ -295,8 +324,27 @@ class EstimatedPowerSource(
             cadence = cadence,
             surface = powerConfigs[0].surface.factor,
             isforcepower = isforcepower,
-            acceleration = acceleration
+            acceleration = acceleration,
+            minPower = minPower
         )
+    }
+
+    private fun gearDetectorFor(configId: Int, ratios: List<Double>, gearChecks: Map<String, GearCheck>): GearDetector {
+        val existing = gearDetector
+        if (existing != null && gearDetectorConfig == configId to ratios) return existing
+        val circumference = gearChecks[configId.toString()]?.circumference ?: GearDetector.DEFAULT_CIRCUMFERENCE
+        Timber.i("Gear detector: ${ratios.size} gears, wheel ${circumference} m")
+        return GearDetector(ratios, circumference).also {
+            gearDetector = it
+            gearDetectorConfig = configId to ratios
+        }
+    }
+
+    private suspend fun commitGearCheck() {
+        val configId = gearDetectorConfig?.first ?: return
+        val check = gearDetector?.takeCheck() ?: return
+        Timber.i("Gear check: $check")
+        saveGearCheck(context, configId, check)
     }
 
 

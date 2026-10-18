@@ -47,6 +47,14 @@ enum class KarooSurface(
     SAND("Mountain Off Road/Sand", 2.20), //2.50
 }
 
+/** Internal gear hub ratios (wheel turns per sprocket turn), from the manufacturers' published tables */
+enum class GearHub(val label: String, val ratios: List<Double>) {
+    NONE("None (derailleur or single speed)", listOf(1.0)),
+    NEXUS_8("Shimano Nexus 8 / Alfine 8", listOf(0.527, 0.644, 0.748, 0.851, 1.0, 1.223, 1.419, 1.615)),
+    ROHLOFF_14("Rohloff Speedhub 14", listOf(0.279, 0.316, 0.360, 0.409, 0.464, 0.528, 0.600, 0.682, 0.774, 0.881, 1.0, 1.135, 1.292, 1.467)),
+    CUSTOM("Other hub (enter ratios)", emptyList()),
+}
+
 
 @Serializable
 data class ConfigData(
@@ -65,6 +73,11 @@ data class ConfigData(
     val surface: KarooSurface = KarooSurface.STANDARD,
     val isforcepower: Boolean = false,
     val autoCalibrate: Boolean = false,
+    val gearHub: GearHub = GearHub.NONE,
+    val chainrings: String = "",
+    val sprockets: String = "",
+    val customHubRatios: String = "",
+    val pedallingFloor: String = "30",
     ) {
     // Stored inverted as isforcepower so configs saved by older versions keep their meaning
     val useCadenceSensor: Boolean get() = !isforcepower
@@ -74,7 +87,33 @@ data class ConfigData(
     val calibrationKey: String
         get() = listOf(id, bikeMass.toDoubleLocale(), dragCoefficient.toDoubleLocale(), frontalArea.toDoubleLocale(),
             rollingResistanceCoefficient.toDoubleLocale(), surface.name).joinToString("|")
+
+    /**
+     * Wheel turns per crank turn in every gear, or empty when the gearing isn't entered.
+     * Teeth are any whole numbers ("46", "11-13-15-17"); custom hub ratios use a dot for decimals.
+     */
+    fun gearRatios(): List<Double> {
+        val rings = teeth(chainrings)
+        val cogs = teeth(sprockets)
+        val hub = if (gearHub == GearHub.CUSTOM) {
+            customHubRatios.split(Regex("[\\s;,]+")).mapNotNull { it.toDoubleOrNull() }.filter { it > 0 }
+        } else gearHub.ratios
+        if (rings.isEmpty() || cogs.isEmpty() || hub.isEmpty()) return emptyList()
+        val all = rings.flatMap { r -> cogs.flatMap { c -> hub.map { h -> r.toDouble() / c * h } } }.sorted()
+        // Different combinations can give (nearly) the same gear
+        return all.fold(mutableListOf()) { acc, x -> if (acc.isEmpty() || x > acc.last() * 1.005) acc.add(x); acc }
+    }
+
+    private fun teeth(text: String) = text.split(Regex("[^0-9]+")).mapNotNull { it.toIntOrNull() }.filter { it > 0 }
 }
+
+/** What the gear detector saw on the last ride, kept per config so the wheel size carries over */
+@Serializable
+data class GearCheck(
+    val circumference: Double,
+    val steadySamples: Int,
+    val matchRate: Double,
+)
 
 
 /**

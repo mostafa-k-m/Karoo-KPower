@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 
 import com.enderthor.kpower.activity.dataStore
 import com.enderthor.kpower.data.CoastCalibration
+import com.enderthor.kpower.data.GearCheck
 import com.enderthor.kpower.data.GpsCoordinates
 import com.enderthor.kpower.data.OpenMeteoCurrentWeatherResponse
 import com.enderthor.kpower.data.OpenWeatherCurrentWeatherResponse
@@ -92,6 +93,7 @@ val lastKnownPositionKey = stringPreferencesKey("lastKnownPosition")
 val preferencesKey = stringPreferencesKey("configdata")
 val calibrationKey = stringPreferencesKey("coastcalibration")
 val pendingCoastKey = stringPreferencesKey("coastpending")
+val gearCheckKey = stringPreferencesKey("gearcheck")
 
 suspend fun savePreferences(context: Context, configDatas: MutableList<ConfigData>) {
     context.dataStore.edit { t ->
@@ -106,6 +108,29 @@ suspend fun saveCalibration(context: Context, configKey: String, calibration: Co
         if (calibration == null) current.remove(configKey) else current[configKey] = calibration
         t[calibrationKey] = Json.encodeToString(current)
     }
+}
+
+/** Stores what the gear detector saw on the last ride, keyed by config id */
+suspend fun saveGearCheck(context: Context, configId: Int, check: GearCheck) {
+    context.dataStore.edit { t ->
+        val current = decodeGearChecks(t[gearCheckKey]).toMutableMap()
+        current[configId.toString()] = check
+        t[gearCheckKey] = Json.encodeToString(current)
+    }
+}
+
+private fun decodeGearChecks(json: String?): Map<String, GearCheck> {
+    if (json == null) return emptyMap()
+    return try {
+        jsonWithUnknownKeys.decodeFromString<Map<String, GearCheck>>(json)
+    } catch (e: Throwable) {
+        Timber.e(e, "Failed to read gear check")
+        emptyMap()
+    }
+}
+
+fun Context.loadGearCheckFlow(): Flow<Map<String, GearCheck>> {
+    return dataStore.data.map { decodeGearChecks(it[gearCheckKey]) }.distinctUntilChanged()
 }
 
 /** Forgets what was learned for one config setup, including samples still waiting for a fit */

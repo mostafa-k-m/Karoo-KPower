@@ -16,7 +16,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.enderthor.kpower.data.ConfigData
+import com.enderthor.kpower.data.GearHub
 import com.enderthor.kpower.data.KarooSurface
+import com.enderthor.kpower.extension.loadGearCheckFlow
+import com.enderthor.kpower.vdevice.GearDetector
 import com.enderthor.kpower.extension.loadCalibrationFlow
 import com.enderthor.kpower.extension.loadPendingCoastCountFlow
 import com.enderthor.kpower.extension.resetCalibration
@@ -49,13 +52,20 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var surface by remember { mutableStateOf(configdata.surface) }
     var isforcepower by remember { mutableStateOf(configdata.isforcepower) }
     var autoCalibrate by remember { mutableStateOf(configdata.autoCalibrate) }
+    var gearHub by remember { mutableStateOf(configdata.gearHub) }
+    var chainrings by remember { mutableStateOf(configdata.chainrings) }
+    var sprockets by remember { mutableStateOf(configdata.sprockets) }
+    var customHubRatios by remember { mutableStateOf(configdata.customHubRatios) }
+    var pedallingFloor by remember { mutableStateOf(configdata.pedallingFloor) }
+    val gearChecks by remember { ctx.loadGearCheckFlow() }.collectAsState(initial = emptyMap())
     val calibrations by remember { ctx.loadCalibrationFlow() }.collectAsState(initial = emptyMap())
     val pendingCounts by remember { ctx.loadPendingCoastCountFlow() }.collectAsState(initial = emptyMap())
     val scope = rememberCoroutineScope()
 
 
     fun getUpdatedConfigData(): ConfigData = ConfigData(
-        configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient, frontalArea, powerLoss, headwind, isOpenWeather, apikey,ftp,surface,isforcepower,autoCalibrate
+        configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient, frontalArea, powerLoss, headwind, isOpenWeather, apikey,ftp,surface,isforcepower,autoCalibrate,
+        gearHub, chainrings, sprockets, customHubRatios, pedallingFloor
     )
 
     Column(modifier = Modifier
@@ -180,6 +190,59 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                         Text("Reset learned values")
                     }
                 }
+            }
+
+            Text("Gearing (optional): with a cadence and a speed sensor, KPower can tell when your gear is driving the wheel and then won't show less than the floor below.", style = MaterialTheme.typography.bodySmall)
+
+            apply {
+                val hubOptions = GearHub.entries.map { DropdownOption(it.name, it.label) }
+                val hubSelection by remember(gearHub) { mutableStateOf(hubOptions.first { it.id == gearHub.name }) }
+                KarooKeyDropdown(remotekey = "Gear hub", options = hubOptions, selectedOption = hubSelection) { selected ->
+                    gearHub = GearHub.valueOf(selected.id)
+                }
+            }
+
+            OutlinedTextField(value = chainrings, modifier = Modifier.fillMaxWidth(),
+                onValueChange = { chainrings = it },
+                label = { Text("Chainring teeth (e.g. 46 or 34-50)") },
+                singleLine = true
+            )
+            OutlinedTextField(value = sprockets, modifier = Modifier.fillMaxWidth(),
+                onValueChange = { sprockets = it },
+                label = { Text("Sprocket teeth (e.g. 22 or 11-13-15-17)") },
+                singleLine = true
+            )
+            OutlinedTextField(value = customHubRatios, modifier = Modifier.fillMaxWidth(),
+                onValueChange = { customHubRatios = it },
+                label = { Text("Hub ratios (e.g. 0.75 1 1.33)") },
+                singleLine = true,
+                enabled = gearHub == GearHub.CUSTOM
+            )
+            OutlinedTextField(value = pedallingFloor, modifier = Modifier.fillMaxWidth(),
+                onValueChange = { pedallingFloor = it },
+                label = { Text("Minimum power while a gear drives the wheel") },
+                suffix = { Text("W") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
+
+            run {
+                val ratios = getUpdatedConfigData().gearRatios()
+                val check = gearChecks[configdata.id.toString()]
+                val wheel = check?.circumference ?: GearDetector.DEFAULT_CIRCUMFERENCE
+                val text = if (ratios.isEmpty()) {
+                    "Gearing not entered: power can drop to 0 W on descents while you pedal."
+                } else {
+                    val gears = ratios.joinToString(" · ") { "%.2f".format(it * wheel) }
+                    val last = when {
+                        check == null -> "No ride checked yet."
+                        check.matchRate >= GearDetector.GOOD_MATCH_RATE ->
+                            "Last ride: %.0f%% of steady pedalling matched these gears.".format(check.matchRate * 100)
+                        else -> "Last ride: only %.0f%% of steady pedalling matched these gears. Check the teeth and hub.".format(check.matchRate * 100)
+                    }
+                    "${ratios.size} gears, m per crank turn (wheel ${"%.0f".format(wheel * 1000)} mm): $gears\n$last"
+                }
+                Text(text, style = MaterialTheme.typography.bodySmall)
             }
 
             FilledTonalButton(modifier = Modifier
