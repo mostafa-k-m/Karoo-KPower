@@ -14,7 +14,7 @@ android {
         minSdk = 23
         targetSdk = 34
         versionCode = 202503032
-        versionName = "1.9.4"
+        versionName = "1.9.4-accel"
     }
 
     buildTypes {
@@ -61,5 +61,6 @@ dependencies {
     implementation(libs.timber)
     implementation(libs.androidx.foundation.android)
     implementation(libs.androidx.foundation.layout.android)
+    testImplementation("junit:junit:4.13.2")
 }
 

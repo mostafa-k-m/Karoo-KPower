@@ -64,6 +64,7 @@ class EstimatedPowerSource(
 
                 val userProfile = karooSystem.consumerFlow<UserProfile>().first()
                 val (userMass, factorMass, factorDistance, factorElevation) = getUserProfileFactors(userProfile)
+                val accelerationTracker = AccelerationTracker()
 
 
                 val powerConfigFlow = context.loadPreferencesFlow()
@@ -114,7 +115,8 @@ class EstimatedPowerSource(
                                 factorDistance,
                                 factorElevation,
                                 configs,
-                                karooValues
+                                karooValues,
+                                accelerationTracker
                             )
 
                             val powerValue = powerBike.calculateCyclingWattage()
@@ -152,16 +154,25 @@ class EstimatedPowerSource(
         factorDistance: Double,
         factorElevation: Double,
         powerConfigs: List<ConfigData>,
-        values: RealKarooValues
+        values: RealKarooValues,
+        accelerationTracker: AccelerationTracker
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
+        val speedMs = speed * factorDistance
+
+        val acceleration = if (values.speed is StreamState.Streaming) {
+            accelerationTracker.update(speedMs)
+        } else {
+            accelerationTracker.reset()
+            0.0
+        }
 
         val slope = values.slope.getValueOrDefault()
         val elevation = values.elevation.getValueOrDefault()
         val finalHeadwind = values.headwind.getValueOrDefault()
 
         var cadence = 0.0
-        var isforcepower = powerConfigs[0].isforcepower
+        var isforcepower = !powerConfigs[0].useCadenceSensor
 
         if( values.cadence is StreamState.Streaming) cadence = values.cadence.getValueOrDefault()
         else isforcepower = true
@@ -174,7 +185,7 @@ class EstimatedPowerSource(
             totalMass = (userMass + powerConfigs[0].bikeMass.toDoubleLocale()) * factorMass,
             rollingResistanceCoefficient = powerConfigs[0].rollingResistanceCoefficient.toDoubleLocale(),
             dragCoefficient = powerConfigs[0].dragCoefficient.toDoubleLocale(),
-            speed = speed * factorDistance,
+            speed = speedMs,
             elevation = elevation * factorElevation,
             windSpeed = finalHeadwind,
             powerLoss = powerConfigs[0].powerLoss.toDoubleLocale() / 100,
@@ -182,7 +193,8 @@ class EstimatedPowerSource(
             ftp = powerConfigs[0].ftp.toDoubleLocale(),
             cadence = cadence,
             surface = powerConfigs[0].surface.factor,
-            isforcepower = isforcepower
+            isforcepower = isforcepower,
+            acceleration = acceleration
         )
     }
 

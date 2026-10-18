@@ -63,7 +63,10 @@ data class ConfigData(
     val ftp: String ,
     val surface: KarooSurface = KarooSurface.STANDARD,
     val isforcepower: Boolean = false
-    )
+    ) {
+    // Stored inverted as isforcepower so configs saved by older versions keep their meaning
+    val useCadenceSensor: Boolean get() = !isforcepower
+}
 
 
 //val previewConfigData = listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false))
