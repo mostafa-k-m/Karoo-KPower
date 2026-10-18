@@ -9,7 +9,7 @@ import kotlin.math.exp
 
 
 class CyclingWattageEstimator(
-    private val gravity: Double = 9.80665,
+    private val gravity: Double = GRAVITY,
     private val slope:  Double,
     private val totalMass: Double,
     private val rollingResistanceCoefficient: Double,
@@ -22,7 +22,8 @@ class CyclingWattageEstimator(
     private val ftp: Double,
     private val cadence: Double,
     private val surface: Double,
-    private val isforcepower: Boolean
+    private val isforcepower: Boolean,
+    private val acceleration: Double = 0.0
 ) {
 
     fun smoothPower(estimatedPower: Double): Double {
@@ -36,7 +37,7 @@ class CyclingWattageEstimator(
             else -> 1.7
         }
        // Timber.d("Estimated power is $estimatedPower")
-        return minOf(estimatedPower, maxOf(factor*ftp,790.0))
+        return estimatedPower.coerceIn(0.0, maxOf(factor*ftp,790.0))
     }
 
     fun calculateCyclingWattage(): Double {
@@ -45,15 +46,21 @@ class CyclingWattageEstimator(
         val gravityForce = calculateGravityForce(slopeAngle)
         val rollingResistanceForce = calculateRollingResistanceForce(slopeAngle)
         val aerodynamicDragForce = calculateAerodynamicDragForce()
-        val estimatedPower = ((gravityForce + rollingResistanceForce + aerodynamicDragForce + calculateDynamicRollingResistanceForce(slopeAngle)) * speed * (1 - powerLoss).pow(-1))
+        val accelerationForce = calculateAccelerationForce()
+        val estimatedPower = ((gravityForce + rollingResistanceForce + aerodynamicDragForce + accelerationForce + calculateDynamicRollingResistanceForce(slopeAngle)) * speed * (1 - powerLoss).pow(-1))
 
         //Timber.d("Force cycling calculation: estimatedPower is $estimatedPower, gravityForce is $gravityForce, rollingResistance is $rollingResistanceForce,aerodynamicDrag is $aerodynamicDragForce")
 
         return smoothPower(estimatedPower)
     }
 
+    // Rotating wheels and tyres need extra energy to spin up; treated as added mass
+    private fun calculateAccelerationForce(): Double {
+        return (totalMass + ROTATING_MASS_KG) * acceleration
+    }
+
     private fun calculateDynamicRollingResistanceForce(slopeAngle: Double): Double {
-        return 0.1 * cos(slopeAngle)
+        return DYNAMIC_ROLLING_FORCE_N * cos(slopeAngle)
     }
     private fun calculateGravityForce(slopeAngle: Double): Double {
         return gravity * sin(slopeAngle) * totalMass
@@ -64,8 +71,14 @@ class CyclingWattageEstimator(
     }
 
     private fun calculateAerodynamicDragForce(): Double {
-        val airDensity = 1.225 * exp(-0.00011856 * elevation)
+        return (0.5 * dragCoefficient * frontalArea * airDensity(elevation) * (speed + windSpeed).pow(2))   // windspeed is positive because it is a headwind
+    }
 
-        return (0.5 * dragCoefficient * frontalArea * airDensity * (speed + windSpeed).pow(2))   // windspeed is positive because it is a headwind
+    companion object {
+        const val ROTATING_MASS_KG = 2.0
+        const val GRAVITY = 9.80665
+        const val DYNAMIC_ROLLING_FORCE_N = 0.1
+
+        fun airDensity(elevation: Double): Double = 1.225 * exp(-0.00011856 * elevation)
     }
 }
