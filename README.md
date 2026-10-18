@@ -1,5 +1,14 @@
 # Karoo Power Extension
 
+> **Changes in this fork** (based on [lockevod/Karoo-KPower](https://github.com/lockevod/Karoo-KPower), MIT licensed):
+> - Acceleration term: power now includes the energy needed to speed up (`AccelerationTracker.kt`, `CyclingWattageEstimator.kt`, `EstimatedPowerSource.kt`).
+> - Estimated power is clamped at 0 W (no negative values when pedalling downhill or braking).
+> - The "Ignore low cadence" switch is shown as "Use cadence sensor" (`PowerConfigDetailScreen.kt`, `ConfigData.kt`); saved settings keep their meaning.
+> - Optional "Auto-calibrate from coasting" switch (off by default). While freewheeling (cadence sensor at 0 rpm, speed from a paired speed sensor rather than GPS, 10–35 km/h, grade within ±3%, steady wind) the deceleration is fitted to CdA and Crr by least squares with outlier rejection (braking, gusts). After each ride the stored values move a quarter of the way to the fit and stay within CdA 0.3–1.0 and effective Crr 0.003–0.02; they are kept per setup (bike mass, Cd, area, Crr, surface: editing these for winter starts a separate calibration, and restoring them brings the old one back) and shown, with a reset button, on the config screen (`CoastCalibration.kt`, `EstimatedPowerSource.kt`, `PowerConfigDetailScreen.kt`). Heart rate is not used.
+> - Unit tests under `app/src/test`.
+>
+> This fork is not affiliated with the original author, Hammerhead or SRAM.
+
 Break change: You need to uninstall current version (if it's < 1.9.5) and install the new one.
 
 This extension for Karoo devices adds a device simulates a virtual power meter. You only need to add this power meter (settings -> sensors) and you can use all power fields.

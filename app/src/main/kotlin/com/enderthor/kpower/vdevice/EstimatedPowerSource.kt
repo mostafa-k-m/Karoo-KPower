@@ -6,7 +6,10 @@ import io.hammerhead.karooext.internal.Emitter
 import io.hammerhead.karooext.models.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
+import com.enderthor.kpower.data.CoastCalibration
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.RealKarooValues
 import com.enderthor.kpower.data.previewConfigData
@@ -31,6 +34,11 @@ class EstimatedPowerSource(
     private var lastRandomPowerTime = 0L
     private var currentRandomPower = 150.0  // Valor inicial
     private val randomPowerUpdateInterval = 5000L  // Cambiar
+
+    private val coastDetector = CoastDetector()
+    private val calibrationMutex = Mutex()
+    private var lastSpeedSourceId: String? = null
+    private var lastCadenceSourceId: String? = null
 
     private fun getRandomPower(): Double {
         val currentTime = System.currentTimeMillis()
@@ -64,7 +72,18 @@ class EstimatedPowerSource(
 
                 val userProfile = karooSystem.consumerFlow<UserProfile>().first()
                 val (userMass, factorMass, factorDistance, factorElevation) = getUserProfileFactors(userProfile)
+                val accelerationTracker = AccelerationTracker()
 
+                val calibrationFlow = context.loadCalibrationFlow()
+                    .catch { e ->
+                        Timber.e(e, "Error loading coast calibration")
+                        emit(emptyMap())
+                    }
+                    .stateIn(
+                        scope = scope,
+                        started = SharingStarted.Eagerly,
+                        initialValue = emptyMap()
+                    )
 
                 val powerConfigFlow = context.loadPreferencesFlow()
                     .catch { e ->
@@ -76,6 +95,29 @@ class EstimatedPowerSource(
                         started = SharingStarted.Eagerly,
                         initialValue = previewConfigData
                     )
+
+                // Sensor data points carry the sensor's SavedDevice id as sourceId; GPS speed comes as DEVICE_LOCATION_ID
+                val speedSensorIdsFlow = karooSystem.consumerFlow<SavedDevices>()
+                    .map { saved -> speedSensorIds(saved.devices) }
+                    .onEach { Timber.i("Speed sensors: $it") }
+                    .catch { e ->
+                        Timber.e(e, "Error loading saved devices")
+                        emit(emptySet())
+                    }
+                    .stateIn(
+                        scope = scope,
+                        started = SharingStarted.Eagerly,
+                        initialValue = emptySet()
+                    )
+
+                // Fit the coasting samples once a ride ends
+                scope.launch {
+                    var wasRiding = false
+                    karooSystem.consumerFlow<RideState>().collect { state ->
+                        if (state is RideState.Idle && wasRiding) commitCalibration(powerConfigFlow.value)
+                        wasRiding = state !is RideState.Idle
+                    }
+                }
 
                 combine(
                     karooSystem.streamDataMonitorFlow(DataType.Type.SPEED),
@@ -114,7 +156,10 @@ class EstimatedPowerSource(
                                 factorDistance,
                                 factorElevation,
                                 configs,
-                                karooValues
+                                karooValues,
+                                accelerationTracker,
+                                calibrationFlow.value,
+                                speedSensorIdsFlow.value
                             )
 
                             val powerValue = powerBike.calculateCyclingWattage()
@@ -143,6 +188,13 @@ class EstimatedPowerSource(
         emitter.setCancellable {
             Timber.w("Stopping connect coroutine")
             scope.cancel()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    commitCalibration(context.loadPreferencesFlow().first())
+                } catch (e: Exception) {
+                    Timber.e(e, "Error saving coast calibration")
+                }
+            }
         }
     }
 
@@ -152,42 +204,129 @@ class EstimatedPowerSource(
         factorDistance: Double,
         factorElevation: Double,
         powerConfigs: List<ConfigData>,
-        values: RealKarooValues
+        values: RealKarooValues,
+        accelerationTracker: AccelerationTracker,
+        calibrations: Map<String, CoastCalibration>,
+        speedSensorIds: Set<String>
     ): CyclingWattageEstimator {
         val speed = values.speed.getValueOrDefault()
+        val speedMs = speed * factorDistance
+
+        val acceleration = if (values.speed is StreamState.Streaming) {
+            accelerationTracker.update(speedMs)
+        } else {
+            accelerationTracker.reset()
+            0.0
+        }
 
         val slope = values.slope.getValueOrDefault()
         val elevation = values.elevation.getValueOrDefault()
         val finalHeadwind = values.headwind.getValueOrDefault()
 
         var cadence = 0.0
-        var isforcepower = powerConfigs[0].isforcepower
+        var isforcepower = !powerConfigs[0].useCadenceSensor
 
         if( values.cadence is StreamState.Streaming) cadence = values.cadence.getValueOrDefault()
         else isforcepower = true
 
 
+        val config = powerConfigs[0]
+        val totalMass = (userMass + config.bikeMass.toDoubleLocale()) * factorMass
+        val calibration = if (config.autoCalibrate) calibrations[config.calibrationKey] else null
+        val cdA = calibration?.cdA ?: (config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale())
+        val crr = calibration?.crr ?: config.rollingResistanceCoefficient.toDoubleLocale()
+
+        val speedSourceId = (values.speed as? StreamState.Streaming)?.dataPoint?.sourceId
+        val cadenceSourceId = (values.cadence as? StreamState.Streaming)?.dataPoint?.sourceId
+        if (speedSourceId != lastSpeedSourceId || cadenceSourceId != lastCadenceSourceId) {
+            Timber.i("Sources: speed=$speedSourceId cadence=$cadenceSourceId")
+            lastSpeedSourceId = speedSourceId
+            lastCadenceSourceId = cadenceSourceId
+        }
+
+        if (config.autoCalibrate) {
+            coastDetector.update(
+                CoastDetector.Input(
+                    configKey = config.calibrationKey,
+                    useCadenceSensor = config.useCadenceSensor,
+                    cadence = if (values.cadence is StreamState.Streaming) cadence else null,
+                    isWheelSpeed = isWheelSpeedSource(speedSourceId, speedSensorIds),
+                    speed = speedMs,
+                    meanSpeed = accelerationTracker.windowMeanSpeed,
+                    acceleration = acceleration,
+                    slope = slope / 100,
+                    headwind = finalHeadwind,
+                    elevation = elevation * factorElevation,
+                    totalMass = totalMass,
+                    cdA = cdA,
+                    crrEff = crr * config.surface.factor,
+                )
+            )
+        }
+
         //Timber.w("VALUES  Speed: $speed, Cadence: $cadence, Slope: $slope, Elevation: $elevation, Headwind: $finalHeadwind")
 
         return CyclingWattageEstimator(
             slope = slope / 100,
-            totalMass = (userMass + powerConfigs[0].bikeMass.toDoubleLocale()) * factorMass,
-            rollingResistanceCoefficient = powerConfigs[0].rollingResistanceCoefficient.toDoubleLocale(),
-            dragCoefficient = powerConfigs[0].dragCoefficient.toDoubleLocale(),
-            speed = speed * factorDistance,
+            totalMass = totalMass,
+            rollingResistanceCoefficient = crr,
+            // A learned CdA replaces Cd × frontal area
+            dragCoefficient = calibration?.cdA ?: config.dragCoefficient.toDoubleLocale(),
+            speed = speedMs,
             elevation = elevation * factorElevation,
             windSpeed = finalHeadwind,
             powerLoss = powerConfigs[0].powerLoss.toDoubleLocale() / 100,
-            frontalArea = powerConfigs[0].frontalArea.toDoubleLocale(),
+            frontalArea = if (calibration != null) 1.0 else config.frontalArea.toDoubleLocale(),
             ftp = powerConfigs[0].ftp.toDoubleLocale(),
             cadence = cadence,
             surface = powerConfigs[0].surface.factor,
-            isforcepower = isforcepower
+            isforcepower = isforcepower,
+            acceleration = acceleration
         )
     }
 
 
+    private suspend fun commitCalibration(configs: List<ConfigData>) {
+        calibrationMutex.withLock {
+            val batch = coastDetector.drain() ?: return
+            val config = configs.find { it.calibrationKey == batch.configKey } ?: return
+            if (!config.autoCalibrate) return
+
+            val key = config.calibrationKey
+            val samples = context.loadPendingCoastSamples(key) + batch.samples
+            val fit = CoastFitter.fit(samples)
+            if (fit == null) {
+                Timber.i("Coast calibration: ${samples.size} samples, not enough for a fit yet")
+                savePendingCoastSamples(context, key, samples.takeLast(MAX_PENDING_SAMPLES))
+                return
+            }
+
+            val updated = CoastFitter.blend(
+                context.loadCalibrationFlow().first()[key],
+                fit,
+                configCdA = config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale(),
+                configCrr = config.rollingResistanceCoefficient.toDoubleLocale(),
+                surface = config.surface.factor
+            )
+            Timber.i("Coast calibration: fit CdA ${fit.cdA}, CrrEff ${fit.crrEff} from ${fit.samples}/${samples.size} samples -> $updated")
+            saveCalibration(context, key, updated)
+            savePendingCoastSamples(context, key, emptyList())
+        }
+    }
+
     companion object {
+        private const val MAX_PENDING_SAMPLES = 1000
+
+        // Without a speed sensor the Karoo derives speed from GPS, which is too coarse to see deceleration
+        fun isWheelSpeedSource(sourceId: String?, speedSensorIds: Set<String>): Boolean =
+            sourceId != null && sourceId in speedSensorIds
+
+        // Enabled speed sensors; a device that also measures power is a trainer, whose speed isn't road physics
+        fun speedSensorIds(devices: List<SavedDevices.SavedDevice>): Set<String> =
+            devices.filter {
+                it.enabled && DataType.Source.SPEED in it.supportedDataTypes && DataType.Source.POWER !in it.supportedDataTypes
+            }.map { it.id }.toSet()
+
         fun fromUid(extension: String, uid: String, karooSystem: KarooSystemService, context: Context): EstimatedPowerSource? {
             return uid.substringAfterLast("-").toIntOrNull()?.let {
                 EstimatedPowerSource(extension, it, karooSystem, context)
