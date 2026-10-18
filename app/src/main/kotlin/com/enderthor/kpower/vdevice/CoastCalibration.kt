@@ -19,7 +19,7 @@ import kotlinx.serialization.Serializable
  *
  *     -(m + m_rot)·a - m·g·sin θ - 0.1·cos θ = CrrEff · m·g·cos θ + CdA · ½·ρ·(v + wind)²
  *
- * which is linear in the two unknowns CrrEff (Crr × surface factor) and CdA.
+ * which is linear in CrrEff (Crr × surface factor) and CdA.
  */
 @Serializable
 data class CoastSample(
@@ -110,7 +110,7 @@ class CoastDetector(private val now: () -> Long = SystemClock::elapsedRealtime) 
             totalMass = input.totalMass,
         )
         if (sample.resistanceForce - sample.predictedForce(input.cdA, input.crrEff) > BRAKING_MARGIN_N) {
-            closeSegment(t, AccelerationTracker.WINDOW_MS)
+            closeSegment(t, AccelerationTracker.COAST_WINDOW_MS)
             braked = true
             return
         }
@@ -157,7 +157,7 @@ class CoastDetector(private val now: () -> Long = SystemClock::elapsedRealtime) 
 
     companion object {
         private const val NOT_COASTING = -1L
-        const val WARMUP_MS = AccelerationTracker.WINDOW_MS
+        const val WARMUP_MS = AccelerationTracker.COAST_WINDOW_MS
         const val END_TRIM_MS = 2000L
         const val MIN_SEGMENT_SAMPLES = 3
         const val MIN_SPEED = 10.0 / 3.6
@@ -171,18 +171,25 @@ class CoastDetector(private val now: () -> Long = SystemClock::elapsedRealtime) 
     }
 }
 
-/** Least-squares fit of CdA and CrrEff over coasting samples, with outlier rejection */
+/**
+ * Least-squares fit of CdA over coasting samples, with outlier rejection.
+ *
+ * Crr comes from the config instead of being fitted: it can be looked up for the tyre (e.g. on
+ * bicyclerollingresistance.com), while the Karoo's grade noise (about ±0.5%, i.e. ±7 N on a
+ * 145 kg bike) is as large as the whole rolling resistance. Fitting both gave impossible Crr
+ * values on a real 28 km ride; with one unknown the fit is well determined.
+ */
 object CoastFitter {
 
-    data class Fit(val cdA: Double, val crrEff: Double, val samples: Int)
+    data class Fit(val cdA: Double, val samples: Int)
 
-    fun fit(samples: List<CoastSample>): Fit? {
+    fun fit(samples: List<CoastSample>, crrEff: Double): Fit? {
         var kept = samples
         for (i in 0 until ITERATIONS) {
-            val fit = leastSquares(kept) ?: return null
+            val cdA = leastSquares(kept, crrEff) ?: return null
             // Robust spread (MAD), so braking or a bad grade reading doesn't hide itself.
             // Re-select from all samples: good ones the first, skewed fit rejected can come back.
-            val residuals = samples.map { it.resistanceForce - it.predictedForce(fit.cdA, fit.crrEff) }
+            val residuals = samples.map { it.resistanceForce - it.predictedForce(cdA, crrEff) }
             val center = median(residuals)
             val sigma = maxOf(MIN_SIGMA_N, 1.4826 * median(residuals.map { abs(it - center) }))
             val next = samples.filterIndexed { j, _ -> abs(residuals[j] - center) <= OUTLIER_SIGMAS * sigma }
@@ -190,49 +197,34 @@ object CoastFitter {
             kept = next
         }
         if (kept.size < MIN_FIT_SAMPLES) return null
-        val result = leastSquares(kept) ?: return null
-        if (kept.maxOf { it.speed } - kept.minOf { it.speed } < MIN_SPEED_RANGE) return null
-        // Negative values mean the data (usually the grade) is off, not that the bike is unusual
-        if (result.cdA <= 0.0 || result.crrEff <= 0.0) return null
-        return result
+        val cdA = leastSquares(kept, crrEff) ?: return null
+        // A negative value means the data (usually the grade) is off, not that the bike is unusual
+        if (cdA <= 0.0) return null
+        return Fit(cdA, kept.size)
     }
 
-    /** Moves the stored values a step towards [fit], so one odd ride can't swing them */
-    fun blend(
-        current: CoastCalibration?,
-        fit: Fit,
-        configCdA: Double,
-        configCrr: Double,
-        surface: Double,
-    ): CoastCalibration {
+    /** Moves the stored CdA a step towards [fit], so one odd ride can't swing it */
+    fun blend(current: CoastCalibration?, fit: Fit, configCdA: Double, configCrr: Double): CoastCalibration {
         val oldCdA = current?.cdA ?: configCdA
-        val oldCrrEff = (current?.crr ?: configCrr) * surface
         val alpha = MAX_BLEND * min(1.0, fit.samples / FULL_WEIGHT_SAMPLES)
         val cdA = oldCdA + alpha * (fit.cdA.coerceIn(CDA_RANGE) - oldCdA)
-        val crrEff = oldCrrEff + alpha * (fit.crrEff.coerceIn(CRR_EFF_RANGE) - oldCrrEff)
         return CoastCalibration(
             cdA = cdA.coerceIn(CDA_RANGE),
-            crr = crrEff.coerceIn(CRR_EFF_RANGE) / surface,
+            crr = configCrr,
             samples = (current?.samples ?: 0) + fit.samples,
             rides = (current?.rides ?: 0) + 1,
         )
     }
 
-    private fun leastSquares(samples: List<CoastSample>): Fit? {
-        if (samples.size < 2) return null
-        var s11 = 0.0; var s12 = 0.0; var s22 = 0.0; var s1y = 0.0; var s2y = 0.0
+    private fun leastSquares(samples: List<CoastSample>, crrEff: Double): Double? {
+        var sxx = 0.0
+        var sxy = 0.0
         for (s in samples) {
-            val x1 = s.rollingBasis
-            val x2 = s.dragBasis
-            val y = s.resistanceForce
-            s11 += x1 * x1; s12 += x1 * x2; s22 += x2 * x2
-            s1y += x1 * y; s2y += x2 * y
+            val x = s.dragBasis
+            sxx += x * x
+            sxy += x * (s.resistanceForce - crrEff * s.rollingBasis)
         }
-        val det = s11 * s22 - s12 * s12
-        if (det <= 1e-9 * s11 * s22) return null
-        val crrEff = (s1y * s22 - s2y * s12) / det
-        val cdA = (s2y * s11 - s1y * s12) / det
-        return Fit(cdA, crrEff, samples.size)
+        return if (sxx > 0.0) sxy / sxx else null
     }
 
     private fun median(values: List<Double>): Double {
@@ -245,9 +237,7 @@ object CoastFitter {
     private const val OUTLIER_SIGMAS = 3.0
     private const val MIN_SIGMA_N = 2.0
     const val MIN_FIT_SAMPLES = 30
-    const val MIN_SPEED_RANGE = 2.0          // m/s; without it CdA and Crr can't be told apart
     const val MAX_BLEND = 0.25
     const val FULL_WEIGHT_SAMPLES = 200.0
     val CDA_RANGE = 0.3..1.0
-    val CRR_EFF_RANGE = 0.003..0.02
 }

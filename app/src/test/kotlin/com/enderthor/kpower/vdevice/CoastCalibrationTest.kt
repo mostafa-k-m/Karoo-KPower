@@ -66,17 +66,18 @@ class CoastCalibrationTest {
 
     @Test
     fun exactSamplesAreRecovered() {
-        val fit = CoastFitter.fit(syntheticSamples(100, Random(1), 0.0, 0.0))
+        val fit = CoastFitter.fit(syntheticSamples(100, Random(1), 0.0, 0.0), trueCrrEff)
         assertNotNull(fit)
         assertEquals(trueCdA, fit!!.cdA, 1e-6)
-        assertEquals(trueCrrEff, fit.crrEff, 1e-8)
     }
 
     @Test
     fun noisySamplesAreRecoveredWithinFivePercent() {
-        val fit = CoastFitter.fit(syntheticSamples(600, Random(2), accelNoise = 0.015, slopeNoise = 0.001))!!
-        assertWithin(trueCdA, fit.cdA, 0.05)
-        assertWithin(trueCrrEff, fit.crrEff, 0.05)
+        // Grade noise as measured on the Karoo (±0.5%): one ride's worth of samples
+        val fit = CoastFitter.fit(syntheticSamples(150, Random(2), accelNoise = 0.03, slopeNoise = 0.005), trueCrrEff)!!
+        assertWithin(trueCdA, fit.cdA, 0.15)
+        val many = CoastFitter.fit(syntheticSamples(1500, Random(2), accelNoise = 0.03, slopeNoise = 0.005), trueCrrEff)!!
+        assertWithin(trueCdA, many.cdA, 0.05)
     }
 
     @Test
@@ -85,42 +86,48 @@ class CoastCalibrationTest {
         val clean = syntheticSamples(1500, random, accelNoise = 0.015, slopeNoise = 0.001)
         // 15% of samples with the brakes on: far more deceleration than the resistances explain
         val braking = clean.take(225).map { it.copy(acceleration = it.acceleration - random.nextDouble(0.3, 1.5)) }
-        val fit = CoastFitter.fit(braking + clean.drop(225))!!
+        val fit = CoastFitter.fit(braking + clean.drop(225), trueCrrEff)!!
         assertWithin(trueCdA, fit.cdA, 0.05)
-        assertWithin(trueCrrEff, fit.crrEff, 0.05)
         assertTrue(fit.samples <= 1500 - 225)
     }
 
     @Test
     fun tooFewSamplesGiveNoFit() {
-        assertNull(CoastFitter.fit(syntheticSamples(CoastFitter.MIN_FIT_SAMPLES - 1, Random(4), 0.0, 0.0)))
+        assertNull(CoastFitter.fit(syntheticSamples(CoastFitter.MIN_FIT_SAMPLES - 1, Random(4), 0.0, 0.0), trueCrrEff))
     }
 
     @Test
-    fun narrowSpeedRangeGivesNoFit() {
-        // All at about the same speed: drag and rolling resistance can't be told apart
+    fun narrowSpeedRangeStillFitsWithKnownCrr() {
+        // With Crr given, coasting at one speed is enough to pin down CdA
         val samples = syntheticSamples(100, Random(5), 0.0, 0.0).map { s ->
             val v = 6.0 + (s.speed - 6.0) * 0.1
             s.copy(speed = v, acceleration = coastAcceleration(v, s.slope, s.headwind))
         }
-        assertNull(CoastFitter.fit(samples))
+        assertEquals(trueCdA, CoastFitter.fit(samples, trueCrrEff)!!.cdA, 1e-6)
+    }
+
+    @Test
+    fun impossibleDataGivesNoFit() {
+        // Speeding up while freewheeling on the flat: the grade or speed reading is wrong
+        val samples = syntheticSamples(100, Random(6), 0.0, 0.0).map { it.copy(slope = 0.0, acceleration = 0.3) }
+        assertNull(CoastFitter.fit(samples, trueCrrEff))
     }
 
     @Test
     fun blendStartsFromConfigAndMovesPartWay() {
-        val fit = CoastFitter.Fit(cdA = 0.60, crrEff = 0.006, samples = 400)
-        val result = CoastFitter.blend(null, fit, configCdA = 0.50, configCrr = 0.008, surface = 0.75)
+        val fit = CoastFitter.Fit(cdA = 0.60, samples = 400)
+        val result = CoastFitter.blend(null, fit, configCdA = 0.50, configCrr = 0.008)
         assertEquals(0.50 + 0.25 * (0.60 - 0.50), result.cdA, 1e-9)
-        assertEquals((0.006 + 0.25 * (0.006 - 0.006)) / 0.75, result.crr, 1e-9)
+        assertEquals(0.008, result.crr, 0.0)
         assertEquals(400, result.samples)
         assertEquals(1, result.rides)
     }
 
     @Test
     fun blendWeighsSmallRidesLess() {
-        val fit = CoastFitter.Fit(cdA = 0.60, crrEff = 0.006, samples = 50)
+        val fit = CoastFitter.Fit(cdA = 0.60, samples = 50)
         val current = CoastCalibration(cdA = 0.50, crr = 0.008, samples = 1000, rides = 4)
-        val result = CoastFitter.blend(current, fit, configCdA = 0.9, configCrr = 0.01, surface = 0.75)
+        val result = CoastFitter.blend(current, fit, configCdA = 0.9, configCrr = 0.008)
         assertEquals(0.50 + 0.25 * 0.25 * (0.60 - 0.50), result.cdA, 1e-9)
         assertEquals(1050, result.samples)
         assertEquals(5, result.rides)
@@ -128,22 +135,20 @@ class CoastCalibrationTest {
 
     @Test
     fun blendClampsToSaneRanges() {
-        val fit = CoastFitter.Fit(cdA = 3.0, crrEff = 0.1, samples = 400)
+        val fit = CoastFitter.Fit(cdA = 3.0, samples = 400)
         // The fit is clamped before blending, so one wild ride moves a quarter of the way to the limit
-        val once = CoastFitter.blend(null, fit, configCdA = 0.9, configCrr = 0.019, surface = 1.0)
+        val once = CoastFitter.blend(null, fit, configCdA = 0.9, configCrr = 0.019)
         assertEquals(0.9 + 0.25 * (1.0 - 0.9), once.cdA, 1e-9)
-        assertEquals(0.019 + 0.25 * (0.02 - 0.019), once.crr, 1e-9)
 
         var cal: CoastCalibration? = null
-        repeat(100) { cal = CoastFitter.blend(cal, fit, configCdA = 0.9, configCrr = 0.019, surface = 1.0) }
+        repeat(100) { cal = CoastFitter.blend(cal, fit, configCdA = 0.9, configCrr = 0.019) }
         assertTrue(cal!!.cdA <= 1.0 && cal!!.cdA > 0.9999)
-        assertTrue(cal!!.crr <= 0.02 && cal!!.crr > 0.01999)
     }
 
     // --- Detector, fed like EstimatedPowerSource does at ~1 Hz ---
 
     private var clock = 0L
-    private val tracker = AccelerationTracker { clock }
+    private val tracker = AccelerationTracker(AccelerationTracker.COAST_WINDOW_MS) { clock }
     private val detector = CoastDetector { clock }
 
     private var configKey = "0"
@@ -216,9 +221,8 @@ class CoastCalibrationTest {
             )
         }
         val batch = detector.drain()!!
-        val fit = CoastFitter.fit(batch.samples)!!
+        val fit = CoastFitter.fit(batch.samples, trueCrrEff)!!
         assertWithin(trueCdA, fit.cdA, 0.05)
-        assertWithin(trueCrrEff, fit.crrEff, 0.05)
     }
 
     @Test
