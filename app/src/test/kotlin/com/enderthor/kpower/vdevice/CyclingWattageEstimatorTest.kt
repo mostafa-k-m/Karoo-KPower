@@ -90,8 +90,8 @@ class CyclingWattageEstimatorTest {
 
     @Test
     fun restartAfterAStopStaysPlausible() {
-        // The wheel sensor reads 0 at a standstill, then jumps straight to
-        // 11.6 km/h (it can't measure very slow turning). With a 3 s window this read 790 W.
+        // The wheel sensor reads 0 at a standstill, then jumps straight to 11.6 km/h (it can't
+        // measure very slow turning). With a 3 s window this read 790 W.
         var clock = 0L
         val tracker = AccelerationTracker { clock }
         val kmh = List(20) { 0.0 } + listOf(11.6, 11.5, 12.1, 12.4, 12.2, 12.6, 13.0, 13.4, 13.8, 14.0)

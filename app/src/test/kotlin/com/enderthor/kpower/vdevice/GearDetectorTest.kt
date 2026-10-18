@@ -74,7 +74,8 @@ class GearDetectorTest {
         assertEquals(1.0, right.takeCheck()!!.matchRate, 1e-9)
         assertNull(right.takeCheck()) // counters start over
 
-        // Entered 42/24 but riding 42/20: every steady sample is off by about 17%
+        // Entered 42/24 but riding 42/20. (A wrong entry close to one hub step off, like 42/17,
+        // can go unnoticed: learning the wheel size absorbs a 6% offset.)
         val wrong = GearDetector(previewConfigData[0].copy(gearHub = GearHub.NEXUS_8, chainrings = "42", sprockets = "24").gearRatios(), wheel)
         val between = 70.0 / 60.0 * wheel * kotlin.math.sqrt(ratios[4] * ratios[5])
         repeat(150) { wrong.update(between, 70.0, isWheelSpeed = true) }
