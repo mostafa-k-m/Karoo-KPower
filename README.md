@@ -1,15 +1,21 @@
 # Karoo Power Extension
 
-> **Changes in this fork** (based on [lockevod/Karoo-KPower](https://github.com/lockevod/Karoo-KPower), MIT licensed):
-> - Acceleration term: power now includes the energy needed to speed up, estimated over 8 s with one-second speed glitches filtered out and at most 1.5 m/s² (`AccelerationTracker.kt`, `CyclingWattageEstimator.kt`, `EstimatedPowerSource.kt`).
-> - Estimated power is clamped at 0 W (no negative values when pedalling downhill or braking). Instead of flat-topping at the upstream cap (max(1.7 × FTP, 790 W)), readings above 60% of it bend smoothly towards it (`CyclingWattageEstimator.softCap`). Moving off from a standstill, where the wheel sensor jumps from 0 to riding speed, counts as a 0.7 m/s² start instead of a one-second sprint.
-> - Optional gearing (hub: Shimano Nexus 8 / Alfine 8, Rohloff 14, or custom ratios; chainring and sprocket teeth). With cadence and speed sensors KPower recognises when a gear is driving the wheel (speed ÷ cadence matches a gear; the wheel size is learned from riding) and then low estimates bend smoothly towards an adjustable floor (default 30 W) instead of dropping to 0 W, mirroring the soft cap at the top (`CyclingWattageEstimator.softFloor`) (`GearDetector.kt`, `ConfigData.kt`). `RideReplayTest` replays a ride exported from a .fit file through the pipeline.
-> - The "Ignore low cadence" switch is shown as "Use cadence sensor" (`PowerConfigDetailScreen.kt`, `ConfigData.kt`); saved settings keep their meaning.
-> - Optional "Auto-calibrate from coasting" switch (off by default). While freewheeling (cadence sensor at 0 rpm, speed from a paired speed sensor rather than GPS, 10–35 km/h, grade within ±3%, steady wind) the deceleration is fitted to CdA by least squares with outlier rejection (braking, gusts); Crr is taken from the config, so enter your tyre's measured value (e.g. from bicyclerollingresistance.com). After each ride the stored CdA moves at most a quarter of the way to the fit and stays within 0.3–1.0; it is kept per setup (bike mass, Cd, area, Crr, surface: editing these for winter starts a separate calibration, and restoring them brings the old one back) and shown, with a reset button, on the config screen (`CoastCalibration.kt`, `EstimatedPowerSource.kt`, `PowerConfigDetailScreen.kt`). Heart rate is not used.
-> - Unit tests under `app/src/test`.
-> - Updates are checked against this fork's releases (`AndroidManifest.xml` `MANIFEST_URL`, `app/manifest.json`), not the original repository. Install the APK from [this fork's latest release](https://github.com/mostafa-k-m/Karoo-KPower/releases/latest); coming from the original KPower you must uninstall it first because the signing keys differ.
+> **This fork** of [lockevod/Karoo-KPower](https://github.com/lockevod/Karoo-KPower) (MIT licensed) changes how power is estimated. It is not affiliated with the original author, Hammerhead or SRAM.
 >
-> This fork is not affiliated with the original author, Hammerhead or SRAM.
+> **What's different**
+> - **Accelerating costs power.** Speed changes are worked out over 8 s, ignoring one-second sensor glitches and limited to 1.5 m/s². Moving off from a stop counts as a brisk start (the wheel sensor jumps from 0 to riding speed), not a one-second sprint.
+> - **No hard limits.** Readings never go below 0 W, and near the top they bend smoothly towards the cap (1.7 × FTP or 790 W, whichever is higher) instead of sitting flat on it.
+> - **Gearing (optional).** Enter your hub (Shimano Nexus 8 / Alfine 8, Rohloff 14, or your own ratios) and chainring and sprocket teeth. With cadence and speed sensors, KPower recognises when a gear is driving the wheel and then low readings bend towards a floor (default 30 W) instead of dropping to 0 W on descents. The wheel size is learned from riding.
+> - **Coast calibration (optional).** With a cadence sensor and a paired speed sensor, freewheeling stretches are used to learn CdA, slowly and within 0.3–1.0, separately for each setup (e.g. summer and winter). Crr comes from your settings: use your tyre's measured value, e.g. from bicyclerollingresistance.com.
+> - "Ignore low cadence" is shown as **Use cadence sensor**; saved settings keep their meaning.
+> - Updates come from [this fork's releases](https://github.com/mostafa-k-m/Karoo-KPower/releases/latest). Coming from the original KPower, uninstall it first: the signing keys differ.
+>
+> **Setting it up**
+> 1. Your weight goes in the Karoo's rider profile; KPower's *Bike Mass* is everything else you carry (bike, bag, lock, clothes).
+> 2. Use a wheel speed sensor and a cadence sensor if you can. A hub-mounted speed sensor that senses rotation magnetically (e.g. Garmin Speed Sensor 2) reads far too high on a dynamo hub: mount it on the other wheel.
+> 3. Only the first configuration in the list is used.
+>
+> **For developers:** the per-second logic is `PowerPipeline` (plain Kotlin, shared by the device and `RideReplayTest`, which replays a ride exported from a .fit file). Unit tests are under `app/src/test`.
 
 Break change: You need to uninstall current version (if it's < 1.9.5) and install the new one.
 
