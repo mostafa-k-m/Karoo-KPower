@@ -73,6 +73,7 @@ class EstimatedPowerSource(
                 val userProfile = karooSystem.consumerFlow<UserProfile>().first()
                 val (userMass, factorMass, factorDistance, factorElevation) = getUserProfileFactors(userProfile)
                 val accelerationTracker = AccelerationTracker()
+                val coastTracker = AccelerationTracker(AccelerationTracker.COAST_WINDOW_MS)
 
                 val calibrationFlow = context.loadCalibrationFlow()
                     .catch { e ->
@@ -158,6 +159,7 @@ class EstimatedPowerSource(
                                 configs,
                                 karooValues,
                                 accelerationTracker,
+                                coastTracker,
                                 calibrationFlow.value,
                                 speedSensorIdsFlow.value
                             )
@@ -206,6 +208,7 @@ class EstimatedPowerSource(
         powerConfigs: List<ConfigData>,
         values: RealKarooValues,
         accelerationTracker: AccelerationTracker,
+        coastTracker: AccelerationTracker,
         calibrations: Map<String, CoastCalibration>,
         speedSensorIds: Set<String>
     ): CyclingWattageEstimator {
@@ -218,16 +221,24 @@ class EstimatedPowerSource(
         val cadenceSourceId = (values.cadence as? StreamState.Streaming)?.dataPoint?.sourceId
         if (speedSourceId != lastSpeedSourceId || cadenceSourceId != lastCadenceSourceId) {
             Timber.i("Sources: speed=$speedSourceId cadence=$cadenceSourceId")
-            if (speedSourceId != lastSpeedSourceId) accelerationTracker.reset()
+            if (speedSourceId != lastSpeedSourceId) {
+                accelerationTracker.reset()
+                coastTracker.reset()
+            }
             lastSpeedSourceId = speedSourceId
             lastCadenceSourceId = cadenceSourceId
         }
 
-        val acceleration = if (values.speed is StreamState.Streaming) {
-            accelerationTracker.update(speedMs)
+        val acceleration: Double
+        val coastAcceleration: Double
+        if (values.speed is StreamState.Streaming) {
+            acceleration = accelerationTracker.update(speedMs)
+            coastAcceleration = coastTracker.update(speedMs)
         } else {
             accelerationTracker.reset()
-            0.0
+            coastTracker.reset()
+            acceleration = 0.0
+            coastAcceleration = 0.0
         }
 
         val slope = values.slope.getValueOrDefault()
@@ -255,8 +266,8 @@ class EstimatedPowerSource(
                     cadence = if (values.cadence is StreamState.Streaming) cadence else null,
                     isWheelSpeed = isWheelSpeedSource(speedSourceId, speedSensorIds),
                     speed = speedMs,
-                    meanSpeed = accelerationTracker.windowMeanSpeed,
-                    acceleration = acceleration,
+                    meanSpeed = coastTracker.windowMeanSpeed,
+                    acceleration = coastAcceleration,
                     slope = slope / 100,
                     headwind = finalHeadwind,
                     elevation = elevation * factorElevation,
@@ -297,7 +308,8 @@ class EstimatedPowerSource(
 
             val key = config.calibrationKey
             val samples = context.loadPendingCoastSamples(key) + batch.samples
-            val fit = CoastFitter.fit(samples)
+            val crr = config.rollingResistanceCoefficient.toDoubleLocale()
+            val fit = CoastFitter.fit(samples, crrEff = crr * config.surface.factor)
             if (fit == null) {
                 Timber.i("Coast calibration: ${samples.size} samples, not enough for a fit yet")
                 savePendingCoastSamples(context, key, samples.takeLast(MAX_PENDING_SAMPLES))
@@ -308,10 +320,9 @@ class EstimatedPowerSource(
                 context.loadCalibrationFlow().first()[key],
                 fit,
                 configCdA = config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale(),
-                configCrr = config.rollingResistanceCoefficient.toDoubleLocale(),
-                surface = config.surface.factor
+                configCrr = crr
             )
-            Timber.i("Coast calibration: fit CdA ${fit.cdA}, CrrEff ${fit.crrEff} from ${fit.samples}/${samples.size} samples -> $updated")
+            Timber.i("Coast calibration: fit CdA ${fit.cdA} from ${fit.samples}/${samples.size} samples -> $updated")
             saveCalibration(context, key, updated)
             savePendingCoastSamples(context, key, emptyList())
         }
