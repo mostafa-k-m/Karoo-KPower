@@ -42,8 +42,9 @@ class CyclingWattageEstimatorTest {
     @Test
     fun accelerationAddsKineticPower() {
         val steady = estimator(speed = 5.0).calculateCyclingWattage()
-        val accelerating = estimator(speed = 5.0, acceleration = 1.0).calculateCyclingWattage()
-        val expectedExtra = (100.0 + CyclingWattageEstimator.ROTATING_MASS_KG) * 1.0 * 5.0
+        // 0.5 m/s² keeps the total below the soft cap's knee
+        val accelerating = estimator(speed = 5.0, acceleration = 0.5).calculateCyclingWattage()
+        val expectedExtra = (100.0 + CyclingWattageEstimator.ROTATING_MASS_KG) * 0.5 * 5.0
         assertEquals(expectedExtra, accelerating - steady, 1e-6)
     }
 
@@ -107,8 +108,17 @@ class CyclingWattageEstimatorTest {
     }
 
     @Test
-    fun capStillApplies() {
-        // ftp 200 → cap is max(1.7*200, 790) = 790
-        assertEquals(790.0, estimator(speed = 25.0, ftp = 200.0).calculateCyclingWattage(), 0.0)
+    fun softCapBendsTowardsTheCeiling() {
+        // ftp 200 → ceiling max(1.7*200, 790) = 790; a 25 m/s estimate (several kW) stays just below it
+        val huge = estimator(speed = 25.0, ftp = 200.0).calculateCyclingWattage()
+        assertTrue(huge < 790.0 && huge > 785.0)
+        // Unchanged up to the knee (0.6 × 790 = 474 W)
+        assertEquals(400.0, CyclingWattageEstimator.softCap(400.0, 790.0), 0.0)
+        // Keeps rising, so bigger estimates still read higher
+        val curve = listOf(500.0, 600.0, 800.0, 1000.0, 1500.0).map { CyclingWattageEstimator.softCap(it, 790.0) }
+        assertEquals(curve.sorted(), curve)
+        assertTrue(curve.zipWithNext().all { (a, b) -> b > a })
+        // A strong rider's ceiling follows FTP
+        assertEquals(400.0 * 1.7, CyclingWattageEstimator.softCap(1e6, 400.0 * 1.7), 1e-6)
     }
 }
