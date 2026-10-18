@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 
 
 import com.enderthor.kpower.activity.dataStore
+import com.enderthor.kpower.data.CoastCalibration
 import com.enderthor.kpower.data.GpsCoordinates
 import com.enderthor.kpower.data.OpenMeteoCurrentWeatherResponse
 import com.enderthor.kpower.data.OpenWeatherCurrentWeatherResponse
@@ -21,6 +22,7 @@ import com.enderthor.kpower.data.WAIT_STREAMS_LONG
 import com.enderthor.kpower.data.WAIT_STREAMS_MEDIUM
 import com.enderthor.kpower.data.WAIT_STREAMS_SHORT
 import com.enderthor.kpower.data.defaultConfigData
+import com.enderthor.kpower.vdevice.CoastSample
 
 
 import io.hammerhead.karooext.KarooSystemService
@@ -88,11 +90,65 @@ val statsKey = stringPreferencesKey("stats")
 val lastKnownPositionKey = stringPreferencesKey("lastKnownPosition")
 
 val preferencesKey = stringPreferencesKey("configdata")
+val calibrationKey = stringPreferencesKey("coastcalibration")
+val pendingCoastKey = stringPreferencesKey("coastpending")
 
 suspend fun savePreferences(context: Context, configDatas: MutableList<ConfigData>) {
     context.dataStore.edit { t ->
         t[preferencesKey] = Json.encodeToString(configDatas)
     }
+}
+
+/** Stores (or with null removes) the coasting calibration of one config setup, see [ConfigData.calibrationKey] */
+suspend fun saveCalibration(context: Context, configKey: String, calibration: CoastCalibration?) {
+    context.dataStore.edit { t ->
+        val current = decodeCalibrations(t[calibrationKey]).toMutableMap()
+        if (calibration == null) current.remove(configKey) else current[configKey] = calibration
+        t[calibrationKey] = Json.encodeToString(current)
+    }
+}
+
+/** Forgets what was learned for one config setup, including samples still waiting for a fit */
+suspend fun resetCalibration(context: Context, configKey: String) {
+    saveCalibration(context, configKey, null)
+    savePendingCoastSamples(context, configKey, emptyList())
+}
+
+/** Coasting samples from rides too short to fit on their own, kept for the next ride */
+suspend fun savePendingCoastSamples(context: Context, configKey: String, samples: List<CoastSample>) {
+    context.dataStore.edit { t ->
+        val current = decodePendingCoastSamples(t[pendingCoastKey]).toMutableMap()
+        if (samples.isEmpty()) current.remove(configKey) else current[configKey] = samples
+        t[pendingCoastKey] = Json.encodeToString(current)
+    }
+}
+
+suspend fun Context.loadPendingCoastSamples(configKey: String): List<CoastSample> {
+    return decodePendingCoastSamples(dataStore.data.first()[pendingCoastKey])[configKey] ?: emptyList()
+}
+
+private fun decodePendingCoastSamples(json: String?): Map<String, List<CoastSample>> {
+    if (json == null) return emptyMap()
+    return try {
+        jsonWithUnknownKeys.decodeFromString<Map<String, List<CoastSample>>>(json)
+    } catch (e: Throwable) {
+        Timber.e(e, "Failed to read pending coast samples")
+        emptyMap()
+    }
+}
+
+private fun decodeCalibrations(json: String?): Map<String, CoastCalibration> {
+    if (json == null) return emptyMap()
+    return try {
+        jsonWithUnknownKeys.decodeFromString<Map<String, CoastCalibration>>(json)
+    } catch (e: Throwable) {
+        Timber.e(e, "Failed to read coast calibration")
+        emptyMap()
+    }
+}
+
+fun Context.loadCalibrationFlow(): Flow<Map<String, CoastCalibration>> {
+    return dataStore.data.map { decodeCalibrations(it[calibrationKey]) }.distinctUntilChanged()
 }
 
 suspend fun saveStats(context: Context, stats: HeadwindStats) {

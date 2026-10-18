@@ -9,7 +9,7 @@ import kotlin.math.exp
 
 
 class CyclingWattageEstimator(
-    private val gravity: Double = 9.80665,
+    private val gravity: Double = GRAVITY,
     private val slope:  Double,
     private val totalMass: Double,
     private val rollingResistanceCoefficient: Double,
@@ -60,7 +60,7 @@ class CyclingWattageEstimator(
     }
 
     private fun calculateDynamicRollingResistanceForce(slopeAngle: Double): Double {
-        return 0.1 * cos(slopeAngle)
+        return DYNAMIC_ROLLING_FORCE_N * cos(slopeAngle)
     }
     private fun calculateGravityForce(slopeAngle: Double): Double {
         return gravity * sin(slopeAngle) * totalMass
@@ -71,12 +71,14 @@ class CyclingWattageEstimator(
     }
 
     private fun calculateAerodynamicDragForce(): Double {
-        val airDensity = 1.225 * exp(-0.00011856 * elevation)
-
-        return (0.5 * dragCoefficient * frontalArea * airDensity * (speed + windSpeed).pow(2))   // windspeed is positive because it is a headwind
+        return (0.5 * dragCoefficient * frontalArea * airDensity(elevation) * (speed + windSpeed).pow(2))   // windspeed is positive because it is a headwind
     }
 
     companion object {
         const val ROTATING_MASS_KG = 2.0
+        const val GRAVITY = 9.80665
+        const val DYNAMIC_ROLLING_FORCE_N = 0.1
+
+        fun airDensity(elevation: Double): Double = 1.225 * exp(-0.00011856 * elevation)
     }
 }
