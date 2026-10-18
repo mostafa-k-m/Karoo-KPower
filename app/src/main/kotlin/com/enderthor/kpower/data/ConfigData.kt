@@ -2,6 +2,7 @@ package com.enderthor.kpower.data
 
 
 import com.enderthor.kpower.extension.HeadingResponse
+import com.enderthor.kpower.extension.toDoubleLocale
 import io.hammerhead.karooext.models.StreamState
 
 import kotlinx.serialization.Serializable
@@ -62,9 +63,31 @@ data class ConfigData(
     val apikey: String,
     val ftp: String ,
     val surface: KarooSurface = KarooSurface.STANDARD,
-    val isforcepower: Boolean = false
-    )
+    val isforcepower: Boolean = false,
+    val autoCalibrate: Boolean = false,
+    ) {
+    // Stored inverted as isforcepower so configs saved by older versions keep their meaning
+    val useCadenceSensor: Boolean get() = !isforcepower
 
+    // Learned values belong to the hand-entered setup: editing it (e.g. for winter) starts a new
+    // calibration, and entering the old values again brings the old calibration back
+    val calibrationKey: String
+        get() = listOf(id, bikeMass.toDoubleLocale(), dragCoefficient.toDoubleLocale(), frontalArea.toDoubleLocale(),
+            rollingResistanceCoefficient.toDoubleLocale(), surface.name).joinToString("|")
+}
+
+
+/**
+ * CdA and Crr learned from coasting for one config setup ([ConfigData.calibrationKey]). [crr] is the base value (like the Crr field):
+ * the estimator still multiplies it by the surface factor.
+ */
+@Serializable
+data class CoastCalibration(
+    val cdA: Double,
+    val crr: Double,
+    val samples: Int = 0,
+    val rides: Int = 0,
+)
 
 //val previewConfigData = listOf(ConfigData(0,"default", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","200", KarooSurface.STANDARD,false))
 val previewConfigData = listOf(ConfigData(0,"Spark", true, "14.0","0.0095","0.8","0.9","2.2","0.0", false, "","257", KarooSurface.GRAVEL,false))

@@ -13,8 +13,8 @@ android {
         applicationId = "com.enderthor.kpower"
         minSdk = 23
         targetSdk = 34
-        versionCode = 202503032
-        versionName = "1.9.4"
+        versionCode = 202610180
+        versionName = "1.9.6-coast"
     }
 
     buildTypes {
@@ -61,5 +61,6 @@ dependencies {
     implementation(libs.timber)
     implementation(libs.androidx.foundation.android)
     implementation(libs.androidx.foundation.layout.android)
+    testImplementation("junit:junit:4.13.2")
 }
 
