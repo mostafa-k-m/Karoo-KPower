@@ -6,6 +6,7 @@ import kotlin.math.cos
 import kotlin.math.pow
 
 import kotlin.math.exp
+import kotlin.math.tanh
 
 
 class CyclingWattageEstimator(
@@ -23,21 +24,20 @@ class CyclingWattageEstimator(
     private val cadence: Double,
     private val surface: Double,
     private val isforcepower: Boolean,
-    private val acceleration: Double = 0.0
+    private val acceleration: Double = 0.0,
+    // While a gear is driving the wheel the rider is pushing, so the reading shouldn't drop to 0 W
+    private val minPower: Double = 0.0
 ) {
 
     fun smoothPower(estimatedPower: Double): Double {
    // Timber.d("Is force power: $isforcepower")
         if (!isforcepower && cadence < 22) return 0.0
 
-        val factor = when {
-            estimatedPower < 210 -> 2.8
-            estimatedPower <= 300 -> 2.5
-            estimatedPower <= 400 -> 2.2
-            else -> 1.7
-        }
-       // Timber.d("Estimated power is $estimatedPower")
-        return estimatedPower.coerceIn(0.0, maxOf(factor*ftp,790.0))
+        // Upstream capped at max(factor × FTP, 790 W) with a factor that only mattered above 400 W
+        // (1.7), so that ceiling is kept; instead of flat-topping, readings bend towards it
+        val ceiling = maxOf(1.7 * ftp, 790.0)
+        val power = softCap(maxOf(estimatedPower, 0.0), ceiling)
+        return maxOf(power, minPower.coerceIn(0.0, ceiling))
     }
 
     fun calculateCyclingWattage(): Double {
@@ -80,5 +80,19 @@ class CyclingWattageEstimator(
         const val DYNAMIC_ROLLING_FORCE_N = 0.1
 
         fun airDensity(elevation: Double): Double = 1.225 * exp(-0.00011856 * elevation)
+
+        const val SOFT_CAP_KNEE = 0.6
+
+        /**
+         * Unchanged up to [SOFT_CAP_KNEE] × [ceiling], then bends smoothly (no corner) towards the
+         * ceiling without reaching it, so a larger estimate still reads a little higher instead of
+         * every glitch showing the same flat maximum.
+         */
+        fun softCap(power: Double, ceiling: Double): Double {
+            val knee = SOFT_CAP_KNEE * ceiling
+            if (power <= knee) return power
+            val room = ceiling - knee
+            return knee + room * tanh((power - knee) / room)
+        }
     }
 }
