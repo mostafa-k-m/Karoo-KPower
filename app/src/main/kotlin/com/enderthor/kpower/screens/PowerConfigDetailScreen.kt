@@ -18,8 +18,10 @@ import androidx.compose.ui.unit.dp
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.KarooSurface
 import com.enderthor.kpower.extension.loadCalibrationFlow
+import com.enderthor.kpower.extension.loadPendingCoastCountFlow
 import com.enderthor.kpower.extension.resetCalibration
 import com.enderthor.kpower.extension.toDoubleLocale
+import com.enderthor.kpower.vdevice.CoastFitter
 import io.hammerhead.karooext.KarooSystemService
 import kotlinx.coroutines.launch
 
@@ -48,6 +50,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var isforcepower by remember { mutableStateOf(configdata.isforcepower) }
     var autoCalibrate by remember { mutableStateOf(configdata.autoCalibrate) }
     val calibrations by remember { ctx.loadCalibrationFlow() }.collectAsState(initial = emptyMap())
+    val pendingCounts by remember { ctx.loadPendingCoastCountFlow() }.collectAsState(initial = emptyMap())
     val scope = rememberCoroutineScope()
 
 
@@ -158,18 +161,22 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 // Follows the fields as they are edited: learned values belong to the setup entered above
                 val calibrationKey = getUpdatedConfigData().calibrationKey
                 val calibration = calibrations[calibrationKey]
+                val pending = pendingCounts[calibrationKey] ?: 0
+                val pendingText = if (pending > 0) {
+                    "\n$pending coasting samples from earlier rides wait for the next fit (needs ${CoastFitter.MIN_FIT_SAMPLES}+ over a range of speeds)."
+                } else ""
                 val text = if (calibration == null) {
-                    "Learned: no coasting data yet for these values. Cd × Area and Crr above are used."
+                    "Learned: no fit yet for these values. Cd × Area and Crr above are used." + pendingText
                 } else {
                     val crrEff = calibration.crr * surface.factor
                     "Learned CdA %.3f (Cd × Area above: %.3f)\nLearned Crr %.4f (effective on surface %.4f)\n%d samples over %d rides".format(
                         calibration.cdA,
                         dragCoefficient.toDoubleLocale() * frontalArea.toDoubleLocale(),
                         calibration.crr, crrEff, calibration.samples, calibration.rides
-                    ) + if (autoCalibrate) "" else "\nNot used while auto-calibrate is off."
+                    ) + pendingText + if (autoCalibrate) "" else "\nNot used while auto-calibrate is off."
                 }
                 Text(text, style = MaterialTheme.typography.bodySmall)
-                if (calibration != null) {
+                if (calibration != null || pending > 0) {
                     TextButton(onClick = { scope.launch { resetCalibration(ctx, calibrationKey) } }) {
                         Text("Reset learned values")
                     }

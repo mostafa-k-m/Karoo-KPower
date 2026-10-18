@@ -127,6 +127,12 @@ suspend fun Context.loadPendingCoastSamples(configKey: String): List<CoastSample
     return decodePendingCoastSamples(dataStore.data.first()[pendingCoastKey])[configKey] ?: emptyList()
 }
 
+/** Number of coasting samples waiting for a fit, per config setup */
+fun Context.loadPendingCoastCountFlow(): Flow<Map<String, Int>> {
+    return dataStore.data.map { t -> decodePendingCoastSamples(t[pendingCoastKey]).mapValues { it.value.size } }
+        .distinctUntilChanged()
+}
+
 private fun decodePendingCoastSamples(json: String?): Map<String, List<CoastSample>> {
     if (json == null) return emptyMap()
     return try {
