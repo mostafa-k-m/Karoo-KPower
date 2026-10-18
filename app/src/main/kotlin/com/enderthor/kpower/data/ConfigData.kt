@@ -117,13 +117,12 @@ data class GearCheck(
 
 
 /**
- * CdA and Crr learned from coasting for one config setup ([ConfigData.calibrationKey]). [crr] is the base value (like the Crr field):
- * the estimator still multiplies it by the surface factor.
+ * CdA learned from coasting for one config setup ([ConfigData.calibrationKey]); Crr always comes
+ * from the config. Older versions also stored a learned "crr", which is ignored when read.
  */
 @Serializable
 data class CoastCalibration(
     val cdA: Double,
-    val crr: Double,
     val samples: Int = 0,
     val rides: Int = 0,
 )
