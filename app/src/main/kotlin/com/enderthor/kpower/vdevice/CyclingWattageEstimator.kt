@@ -23,7 +23,9 @@ class CyclingWattageEstimator(
     private val cadence: Double,
     private val surface: Double,
     private val isforcepower: Boolean,
-    private val acceleration: Double = 0.0
+    private val acceleration: Double = 0.0,
+    // While a gear is driving the wheel the rider is pushing, so the reading shouldn't drop to 0 W
+    private val minPower: Double = 0.0
 ) {
 
     fun smoothPower(estimatedPower: Double): Double {
@@ -37,7 +39,8 @@ class CyclingWattageEstimator(
             else -> 1.7
         }
        // Timber.d("Estimated power is $estimatedPower")
-        return estimatedPower.coerceIn(0.0, maxOf(factor*ftp,790.0))
+        val cap = maxOf(factor*ftp,790.0)
+        return estimatedPower.coerceIn(minPower.coerceIn(0.0, cap), cap)
     }
 
     fun calculateCyclingWattage(): Double {
