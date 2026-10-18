@@ -80,7 +80,9 @@ class CyclingWattageEstimatorTest {
 
     @Test
     fun floorWhileAGearDrivesTheWheel() {
-        assertEquals(30.0, estimator(slope = -0.05, minPower = 30.0).calculateCyclingWattage(), 0.0)
+        // A steep descent's very negative estimate reads just above the floor, never below it
+        val descent = estimator(slope = -0.05, minPower = 30.0).calculateCyclingWattage()
+        assertTrue(descent > 30.0 && descent < 30.5)
         // Above the floor nothing changes, and below 22 rpm it's still 0 W
         assertEquals(estimator().calculateCyclingWattage(), estimator(minPower = 30.0).calculateCyclingWattage(), 1e-9)
         assertEquals(0.0, estimator(cadence = 10.0, minPower = 30.0).calculateCyclingWattage(), 0.0)
@@ -105,6 +107,17 @@ class CyclingWattageEstimatorTest {
         println("restart: " + power.drop(19).joinToString { "%.0f".format(it) })
         // Getting 102 kg to 12 km/h takes ~570 J; over a few seconds that's a few hundred watts
         assertTrue(power.max() < 400.0)
+    }
+
+    @Test
+    fun softFloorBendsTowardsTheFloor() {
+        // Unchanged from the knee (2 × 30 W) up, continuous there, then approaching 30 W from above
+        assertEquals(80.0, CyclingWattageEstimator.softFloor(80.0, 30.0), 0.0)
+        assertEquals(60.0, CyclingWattageEstimator.softFloor(60.0 - 1e-9, 30.0), 1e-6)
+        val curve = listOf(-500.0, -100.0, -20.0, 0.0, 20.0, 40.0, 59.0).map { CyclingWattageEstimator.softFloor(it, 30.0) }
+        assertTrue(curve.zipWithNext().all { (a, b) -> b > a })
+        assertTrue(curve.all { it > 30.0 })
+        assertEquals(30.0, curve.first(), 1e-6)
     }
 
     @Test

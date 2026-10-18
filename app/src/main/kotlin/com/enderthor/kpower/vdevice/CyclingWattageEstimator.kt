@@ -36,8 +36,11 @@ class CyclingWattageEstimator(
         // Upstream capped at max(factor × FTP, 790 W) with a factor that only mattered above 400 W
         // (1.7), so that ceiling is kept; instead of flat-topping, readings bend towards it
         val ceiling = maxOf(1.7 * ftp, 790.0)
-        val power = softCap(maxOf(estimatedPower, 0.0), ceiling)
-        return maxOf(power, minPower.coerceIn(0.0, ceiling))
+        val capped = if (estimatedPower > 0.0) softCap(estimatedPower, ceiling) else estimatedPower
+        // While a gear drives the wheel, low and negative estimates bend towards the floor rather
+        // than stopping at it; otherwise negative estimates read 0 W like a meter on a freewheel
+        val floor = minPower.coerceIn(0.0, SOFT_CAP_KNEE * ceiling / SOFT_FLOOR_KNEE)
+        return if (floor > 0.0) softFloor(capped, floor) else maxOf(capped, 0.0)
     }
 
     fun calculateCyclingWattage(): Double {
@@ -93,6 +96,20 @@ class CyclingWattageEstimator(
             if (power <= knee) return power
             val room = ceiling - knee
             return knee + room * tanh((power - knee) / room)
+        }
+
+        const val SOFT_FLOOR_KNEE = 2.0
+
+        /**
+         * The mirror of [softCap] at the bottom: unchanged down to [SOFT_FLOOR_KNEE] × [floor], then
+         * bends smoothly towards the floor without reaching it, so a lower (or more negative)
+         * estimate still reads a little lower instead of sitting on a flat minimum.
+         */
+        fun softFloor(power: Double, floor: Double): Double {
+            val knee = SOFT_FLOOR_KNEE * floor
+            if (power >= knee) return power
+            val room = knee - floor
+            return floor + room * exp((power - knee) / room)
         }
     }
 }
