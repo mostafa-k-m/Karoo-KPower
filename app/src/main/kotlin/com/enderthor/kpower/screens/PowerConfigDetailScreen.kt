@@ -132,11 +132,11 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = isforcepower, onCheckedChange = {
-                    isforcepower = it
+                Switch(checked = !isforcepower, onCheckedChange = {
+                    isforcepower = !it
                 })
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("Ignore low cadence (always calculate power)?")
+                Text("Use cadence sensor? (off: always calculate power)")
             }
 
             FilledTonalButton(modifier = Modifier
