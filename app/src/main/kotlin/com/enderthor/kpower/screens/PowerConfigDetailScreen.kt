@@ -17,7 +17,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.KarooSurface
+import com.enderthor.kpower.extension.loadCalibrationFlow
+import com.enderthor.kpower.extension.resetCalibration
+import com.enderthor.kpower.extension.toDoubleLocale
 import io.hammerhead.karooext.KarooSystemService
+import kotlinx.coroutines.launch
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,10 +46,13 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var ftp by remember { mutableStateOf(configdata.ftp) }
     var surface by remember { mutableStateOf(configdata.surface) }
     var isforcepower by remember { mutableStateOf(configdata.isforcepower) }
+    var autoCalibrate by remember { mutableStateOf(configdata.autoCalibrate) }
+    val calibrations by remember { ctx.loadCalibrationFlow() }.collectAsState(initial = emptyMap())
+    val scope = rememberCoroutineScope()
 
 
     fun getUpdatedConfigData(): ConfigData = ConfigData(
-        configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient, frontalArea, powerLoss, headwind, isOpenWeather, apikey,ftp,surface,isforcepower
+        configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient, frontalArea, powerLoss, headwind, isOpenWeather, apikey,ftp,surface,isforcepower,autoCalibrate
     )
 
     Column(modifier = Modifier
@@ -137,6 +144,36 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 })
                 Spacer(modifier = Modifier.width(10.dp))
                 Text("Use cadence sensor? (off: always calculate power)")
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = autoCalibrate, onCheckedChange = {
+                    autoCalibrate = it
+                })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Auto-calibrate from coasting? (needs cadence and wheel speed sensors)")
+            }
+
+            if (!isCreating) {
+                // Follows the fields as they are edited: learned values belong to the setup entered above
+                val calibrationKey = getUpdatedConfigData().calibrationKey
+                val calibration = calibrations[calibrationKey]
+                val text = if (calibration == null) {
+                    "Learned: no coasting data yet for these values. Cd × Area and Crr above are used."
+                } else {
+                    val crrEff = calibration.crr * surface.factor
+                    "Learned CdA %.3f (Cd × Area above: %.3f)\nLearned Crr %.4f (effective on surface %.4f)\n%d samples over %d rides".format(
+                        calibration.cdA,
+                        dragCoefficient.toDoubleLocale() * frontalArea.toDoubleLocale(),
+                        calibration.crr, crrEff, calibration.samples, calibration.rides
+                    ) + if (autoCalibrate) "" else "\nNot used while auto-calibrate is off."
+                }
+                Text(text, style = MaterialTheme.typography.bodySmall)
+                if (calibration != null) {
+                    TextButton(onClick = { scope.launch { resetCalibration(ctx, calibrationKey) } }) {
+                        Text("Reset learned values")
+                    }
+                }
             }
 
             FilledTonalButton(modifier = Modifier
