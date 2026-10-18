@@ -10,6 +10,11 @@ import android.os.SystemClock
  * last three, so a one-second dropout (e.g. 14 → 8 → 14 km/h) isn't read as braking and then
  * sprinting. Sample at every calculation (not only when speed changes): the speed stream drops
  * repeated values, and a constant speed must give a slope of 0.
+ *
+ * A wheel sensor reads 0 until the wheel turns fast enough, then jumps to the riding speed
+ * (0 → 11.6 km/h in one second at a junction), and while standing still the readings can be
+ * too sparse for the window to remember the stop. So when the bike moves off from a standstill,
+ * the seconds the sensor couldn't see are filled with a [START_ACCELERATION] ramp from zero.
  */
 class AccelerationTracker(
     private val windowMs: Long = POWER_WINDOW_MS,
@@ -18,6 +23,8 @@ class AccelerationTracker(
 
     private val raw = ArrayDeque<Double>()
     private val samples = ArrayDeque<Pair<Long, Double>>()
+    // Survives reset(): the Karoo may switch to GPS speed while stopped and back on moving off
+    private var standingStill = false
 
     /** Mean speed over the window: the speed that matches the returned slope (used by coast calibration) */
     var windowMeanSpeed = 0.0
@@ -29,6 +36,19 @@ class AccelerationTracker(
         raw.addLast(speedMs)
         if (raw.size > MEDIAN_OF) raw.removeFirst()
         val filtered = if (raw.size < MEDIAN_OF) speedMs else raw.sorted()[MEDIAN_OF / 2]
+
+        if (standingStill && filtered >= MOVING_SPEED) {
+            samples.clear()
+            var back = 1
+            while (true) {
+                val v = filtered - START_ACCELERATION * back
+                val at = t - back * 1000L
+                if (v < 0.0 || t - at > windowMs) break
+                samples.addFirst(at to v)
+                back++
+            }
+        }
+        standingStill = filtered < STANDSTILL_SPEED
 
         samples.addLast(t to filtered)
         while (t - samples.first().first > windowMs) samples.removeFirst()
@@ -67,5 +87,8 @@ class AccelerationTracker(
         const val MAX_GAP_MS = 5000L
         const val MEDIAN_OF = 3
         const val MAX_ACCELERATION = 1.5 // m/s², about the most a loaded bike can do; rejects sensor spikes
+        const val START_ACCELERATION = 0.7 // m/s², a brisk start: 0 → 12 km/h in about 5 s
+        const val STANDSTILL_SPEED = 0.5 // m/s
+        const val MOVING_SPEED = 1.0 // m/s
     }
 }
