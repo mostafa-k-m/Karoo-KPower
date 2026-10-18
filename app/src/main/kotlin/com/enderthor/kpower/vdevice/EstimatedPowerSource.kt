@@ -212,6 +212,17 @@ class EstimatedPowerSource(
         val speed = values.speed.getValueOrDefault()
         val speedMs = speed * factorDistance
 
+        // The Karoo falls back to GPS speed while the wheel sensor is quiet (and back again); the two
+        // disagree, so a slope across the switch would be a phantom acceleration
+        val speedSourceId = (values.speed as? StreamState.Streaming)?.dataPoint?.sourceId
+        val cadenceSourceId = (values.cadence as? StreamState.Streaming)?.dataPoint?.sourceId
+        if (speedSourceId != lastSpeedSourceId || cadenceSourceId != lastCadenceSourceId) {
+            Timber.i("Sources: speed=$speedSourceId cadence=$cadenceSourceId")
+            if (speedSourceId != lastSpeedSourceId) accelerationTracker.reset()
+            lastSpeedSourceId = speedSourceId
+            lastCadenceSourceId = cadenceSourceId
+        }
+
         val acceleration = if (values.speed is StreamState.Streaming) {
             accelerationTracker.update(speedMs)
         } else {
@@ -235,14 +246,6 @@ class EstimatedPowerSource(
         val calibration = if (config.autoCalibrate) calibrations[config.calibrationKey] else null
         val cdA = calibration?.cdA ?: (config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale())
         val crr = calibration?.crr ?: config.rollingResistanceCoefficient.toDoubleLocale()
-
-        val speedSourceId = (values.speed as? StreamState.Streaming)?.dataPoint?.sourceId
-        val cadenceSourceId = (values.cadence as? StreamState.Streaming)?.dataPoint?.sourceId
-        if (speedSourceId != lastSpeedSourceId || cadenceSourceId != lastCadenceSourceId) {
-            Timber.i("Sources: speed=$speedSourceId cadence=$cadenceSourceId")
-            lastSpeedSourceId = speedSourceId
-            lastCadenceSourceId = cadenceSourceId
-        }
 
         if (config.autoCalibrate) {
             coastDetector.update(
