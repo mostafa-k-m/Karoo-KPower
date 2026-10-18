@@ -70,6 +70,23 @@ class AccelerationTrackerTest {
     }
 
     @Test
+    fun aDropoutIsNotAStandstill() {
+        // The stream monitor's placeholder 0 while the stream is down, then the sensor is back
+        // at riding speed: no start ramp, so no phantom 0 → 25 km/h acceleration
+        for (i in 0..5) sample(i * 1000L, 6.9)
+        tracker.interrupt()
+        assertEquals(0.0, sample(7000, 6.9), 1e-9)
+        assertEquals(0.0, sample(8000, 6.9), 1e-9)
+    }
+
+    @Test
+    fun aFastReadingAfterAStopIsAGapNotAStart() {
+        // Real stop, then 25 km/h: no sensor jump looks like that, so start a new window instead
+        sample(0, 0.0)
+        assertEquals(0.0, sample(9000, 6.9), 1e-9)
+    }
+
+    @Test
     fun singleSampleDropoutIsIgnored() {
         // 14 → 8 → 14 km/h for one second used to read as hard braking and then a sprint
         for (i in 0..5) sample(i * 1000L, 4.0)

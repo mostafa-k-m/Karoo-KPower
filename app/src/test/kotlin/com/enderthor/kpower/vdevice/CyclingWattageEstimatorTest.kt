@@ -90,8 +90,8 @@ class CyclingWattageEstimatorTest {
 
     @Test
     fun restartAfterAStopStaysPlausible() {
-        // 2026-10-18, 16:03:55: the wheel sensor reads 0 at a standstill, then jumps straight to
-        // 11.6 km/h (it can't measure very slow turning). With a 3 s window this read 790 W.
+        // The wheel sensor reads 0 at a standstill, then jumps straight to 11.6 km/h (it can't
+        // measure very slow turning). With a 3 s window this read 790 W.
         var clock = 0L
         val tracker = AccelerationTracker { clock }
         val kmh = List(20) { 0.0 } + listOf(11.6, 11.5, 12.1, 12.4, 12.2, 12.6, 13.0, 13.4, 13.8, 14.0)
@@ -99,13 +99,13 @@ class CyclingWattageEstimatorTest {
             clock = i * 1000L
             val a = tracker.update(v / 3.6)
             CyclingWattageEstimator(
-                slope = 0.0, totalMass = 144.0, rollingResistanceCoefficient = 0.007, dragCoefficient = 0.88,
-                frontalArea = 0.7, speed = v / 3.6, windSpeed = 0.0, powerLoss = 0.06, elevation = 30.0,
-                ftp = 165.0, cadence = 70.0, surface = 0.75, isforcepower = false, acceleration = a,
+                slope = 0.0, totalMass = 120.0, rollingResistanceCoefficient = 0.007, dragCoefficient = 0.9,
+                frontalArea = 0.65, speed = v / 3.6, windSpeed = 0.0, powerLoss = 0.06, elevation = 30.0,
+                ftp = 200.0, cadence = 70.0, surface = 0.75, isforcepower = false, acceleration = a,
             ).calculateCyclingWattage()
         }
         println("restart: " + power.drop(19).joinToString { "%.0f".format(it) })
-        // Getting 146 kg to 11.6 km/h takes ~760 J; over a few seconds that's a few hundred watts
+        // Getting 122 kg to 11.6 km/h takes ~640 J; over a few seconds that's a few hundred watts
         assertTrue(power.max() < 400.0)
     }
 

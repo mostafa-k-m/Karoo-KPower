@@ -89,7 +89,7 @@ class GearDetector(
         const val MIN_SPEED = 2.0                // m/s
         // Internal hubs step 13–23%, so ±4% leaves clear gaps between gears; with a derailleur's
         // 6–10% steps nearly every ratio is near some gear and the check is much less selective.
-        // 4% with averaging caught 63% of the near-zero readings while pedalling hard on a 28 km
+        // 4% with averaging caught 63% of the near-zero readings while pedalling hard on a test
         // replay (3% without averaging: 43%), while 99% of steady pedalling matched a gear
         const val MATCH_TOLERANCE = 0.04
         const val LEARN_TOLERANCE = 0.06

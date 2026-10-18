@@ -10,18 +10,18 @@ import org.junit.Test
 
 class GearDetectorTest {
 
-    // Cube Hyde Pro FE: Nexus 8, 46/22; the Karoo's auto wheel size settled at 2168 mm
-    private val nexus = previewConfigData[0].copy(gearHub = GearHub.NEXUS_8, chainrings = "46", sprockets = "22")
+    // A Nexus 8 hub with 42/20 gearing on a 700C wheel
+    private val nexus = previewConfigData[0].copy(gearHub = GearHub.NEXUS_8, chainrings = "42", sprockets = "20")
     private val ratios = nexus.gearRatios()
-    private val wheel = 2.168
+    private val wheel = 2.17
 
     private fun speedFor(gear: Int, cadence: Double, wheelM: Double = wheel) = cadence / 60.0 * wheelM * ratios[gear]
 
     @Test
     fun gearRatiosFromTeethAndHub() {
         assertEquals(8, ratios.size)
-        assertEquals(46.0 / 22 * 0.527, ratios.first(), 1e-9)
-        assertEquals(46.0 / 22 * 1.615, ratios.last(), 1e-9)
+        assertEquals(42.0 / 20 * 0.527, ratios.first(), 1e-9)
+        assertEquals(42.0 / 20 * 1.615, ratios.last(), 1e-9)
     }
 
     @Test
@@ -74,8 +74,9 @@ class GearDetectorTest {
         assertEquals(1.0, right.takeCheck()!!.matchRate, 1e-9)
         assertNull(right.takeCheck()) // counters start over
 
-        // Entered 46/18 but riding 46/22: every steady sample is off by about 22%
-        val wrong = GearDetector(previewConfigData[0].copy(gearHub = GearHub.NEXUS_8, chainrings = "46", sprockets = "18").gearRatios(), wheel)
+        // Entered 42/24 but riding 42/20. (A wrong entry close to one hub step off, like 42/17,
+        // can go unnoticed: learning the wheel size absorbs a 6% offset.)
+        val wrong = GearDetector(previewConfigData[0].copy(gearHub = GearHub.NEXUS_8, chainrings = "42", sprockets = "24").gearRatios(), wheel)
         val between = 70.0 / 60.0 * wheel * kotlin.math.sqrt(ratios[4] * ratios[5])
         repeat(150) { wrong.update(between, 70.0, isWheelSpeed = true) }
         assertTrue(wrong.takeCheck()!!.matchRate < GearDetector.GOOD_MATCH_RATE)

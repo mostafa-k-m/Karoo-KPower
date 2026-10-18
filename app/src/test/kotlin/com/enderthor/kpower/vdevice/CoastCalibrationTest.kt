@@ -22,10 +22,10 @@ import kotlin.random.Random
 
 class CoastCalibrationTest {
 
-    // Summer commuter: Cd 0.88 × A 0.62, Crr 0.0070 on asphalt (0.75)
-    private val trueCdA = 0.88 * 0.62
+    // A loaded commuter bike: CdA 0.55, Crr 0.007 on asphalt (0.75)
+    private val trueCdA = 0.55
     private val trueCrrEff = 0.0070 * 0.75
-    private val mass = 118.0 + 26.5
+    private val mass = 95.0 + 25.0
     private val elevation = 30.0
     private val rho = CyclingWattageEstimator.airDensity(elevation)
 
@@ -116,9 +116,8 @@ class CoastCalibrationTest {
     @Test
     fun blendStartsFromConfigAndMovesPartWay() {
         val fit = CoastFitter.Fit(cdA = 0.60, samples = 400)
-        val result = CoastFitter.blend(null, fit, configCdA = 0.50, configCrr = 0.008)
+        val result = CoastFitter.blend(null, fit, configCdA = 0.50)
         assertEquals(0.50 + 0.25 * (0.60 - 0.50), result.cdA, 1e-9)
-        assertEquals(0.008, result.crr, 0.0)
         assertEquals(400, result.samples)
         assertEquals(1, result.rides)
     }
@@ -126,8 +125,8 @@ class CoastCalibrationTest {
     @Test
     fun blendWeighsSmallRidesLess() {
         val fit = CoastFitter.Fit(cdA = 0.60, samples = 50)
-        val current = CoastCalibration(cdA = 0.50, crr = 0.008, samples = 1000, rides = 4)
-        val result = CoastFitter.blend(current, fit, configCdA = 0.9, configCrr = 0.008)
+        val current = CoastCalibration(cdA = 0.50, samples = 1000, rides = 4)
+        val result = CoastFitter.blend(current, fit, configCdA = 0.9)
         assertEquals(0.50 + 0.25 * 0.25 * (0.60 - 0.50), result.cdA, 1e-9)
         assertEquals(1050, result.samples)
         assertEquals(5, result.rides)
@@ -137,11 +136,11 @@ class CoastCalibrationTest {
     fun blendClampsToSaneRanges() {
         val fit = CoastFitter.Fit(cdA = 3.0, samples = 400)
         // The fit is clamped before blending, so one wild ride moves a quarter of the way to the limit
-        val once = CoastFitter.blend(null, fit, configCdA = 0.9, configCrr = 0.019)
+        val once = CoastFitter.blend(null, fit, configCdA = 0.9)
         assertEquals(0.9 + 0.25 * (1.0 - 0.9), once.cdA, 1e-9)
 
         var cal: CoastCalibration? = null
-        repeat(100) { cal = CoastFitter.blend(cal, fit, configCdA = 0.9, configCrr = 0.019) }
+        repeat(100) { cal = CoastFitter.blend(cal, fit, configCdA = 0.9) }
         assertTrue(cal!!.cdA <= 1.0 && cal!!.cdA > 0.9999)
     }
 
@@ -304,7 +303,7 @@ class CoastCalibrationTest {
         assertTrue(summer.calibrationKey != summer.copy(surface = KarooSurface.STANDARD).calibrationKey)
     }
 
-    // Ids as logged on a Karoo 3 with ANT+ speed and cadence sensors
+    // Ids in the format the Karoo uses for ANT+ sensors
     private fun device(id: String, vararg types: String, enabled: Boolean = true) =
         SavedDevices.SavedDevice(id, "ANT_PLUS", id, enabled, SavedDevices.SavedDevice.DeviceDetail(null, null, null, null), emptyMap(), types.toList(), null)
 
@@ -313,16 +312,16 @@ class CoastCalibrationTest {
         val ids = EstimatedPowerSource.speedSensorIds(
             listOf(
                 device("kpower::estimated-power-2000", DataType.Source.POWER),
-                device("91849-122-17", DataType.Source.CADENCE),
-                device("721328-123-177", DataType.Source.SPEED, "TYPE_SPD_DISTANCE_DIFF_ID"),
+                device("54321-122-1", DataType.Source.CADENCE),
+                device("12345-123-1", DataType.Source.SPEED, "TYPE_SPD_DISTANCE_DIFF_ID"),
                 device("5555-1-1", DataType.Source.SPEED, enabled = false),
                 device("trainer-1", DataType.Source.SPEED, DataType.Source.POWER),
             )
         )
-        assertEquals(setOf("721328-123-177"), ids)
-        assertTrue(EstimatedPowerSource.isWheelSpeedSource("721328-123-177", ids))
+        assertEquals(setOf("12345-123-1"), ids)
+        assertTrue(EstimatedPowerSource.isWheelSpeedSource("12345-123-1", ids))
         assertTrue(!EstimatedPowerSource.isWheelSpeedSource("DEVICE_LOCATION_ID", ids))
         assertTrue(!EstimatedPowerSource.isWheelSpeedSource(null, ids))
-        assertTrue(!EstimatedPowerSource.isWheelSpeedSource("721328-123-177", emptySet()))
+        assertTrue(!EstimatedPowerSource.isWheelSpeedSource("12345-123-1", emptySet()))
     }
 }

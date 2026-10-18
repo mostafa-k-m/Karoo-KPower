@@ -177,7 +177,7 @@ class CoastDetector(private val now: () -> Long = SystemClock::elapsedRealtime) 
  * Crr comes from the config instead of being fitted: it can be looked up for the tyre (e.g. on
  * bicyclerollingresistance.com), while the Karoo's grade noise (about ±0.5%, i.e. ±7 N on a
  * 145 kg bike) is as large as the whole rolling resistance. Fitting both gave impossible Crr
- * values on a real 28 km ride; with one unknown the fit is well determined.
+ * values on a real ride; with one unknown the fit is well determined.
  */
 object CoastFitter {
 
@@ -204,13 +204,12 @@ object CoastFitter {
     }
 
     /** Moves the stored CdA a step towards [fit], so one odd ride can't swing it */
-    fun blend(current: CoastCalibration?, fit: Fit, configCdA: Double, configCrr: Double): CoastCalibration {
+    fun blend(current: CoastCalibration?, fit: Fit, configCdA: Double): CoastCalibration {
         val oldCdA = current?.cdA ?: configCdA
         val alpha = MAX_BLEND * min(1.0, fit.samples / FULL_WEIGHT_SAMPLES)
         val cdA = oldCdA + alpha * (fit.cdA.coerceIn(CDA_RANGE) - oldCdA)
         return CoastCalibration(
             cdA = cdA.coerceIn(CDA_RANGE),
-            crr = configCrr,
             samples = (current?.samples ?: 0) + fit.samples,
             rides = (current?.rides ?: 0) + 1,
         )
