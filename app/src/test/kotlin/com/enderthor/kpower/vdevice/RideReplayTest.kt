@@ -43,6 +43,14 @@ class RideReplayTest {
         report("floor on ", rows, on.power)
         val lowHard = rows.indices.filter { (rows[it].cadence ?: 0.0) >= 60 && off.power[it] < 40 }
         println("  of ${lowHard.size} s at 60+ rpm under 40 W (floor off), ${pct(lowHard.count { on.driving[it] }, lowHard.size)} had a gear driving the wheel")
+        val floorW = config.pedallingFloor.toDouble()
+        val zone = rows.indices.filter { on.driving[it] && off.power[it] < CyclingWattageEstimator.SOFT_FLOOR_KNEE * floorW }
+        if (zone.isNotEmpty()) {
+            val soft = zone.map { on.power[it] }.sorted()
+            println("  near the floor (gear driving, estimate under %.0f W): %d s; a hard floor would read exactly %.0f W in %d s; soft floor reads %.1f / %.1f / %.1f W (min / median / max)".format(
+                CyclingWattageEstimator.SOFT_FLOOR_KNEE * floorW, zone.size, floorW, zone.count { off.power[it] < floorW },
+                soft.first(), soft[soft.size / 2], soft.last()))
+        }
         val raised = rows.indices.count { on.power[it] > off.power[it] + 0.5 }
         println("  floor raised the reading in $raised s; mean pedalling power +%.1f W".format(
             rows.indices.filter { (rows[it].cadence ?: 0.0) >= 22 }.let { idx -> idx.sumOf { on.power[it] - off.power[it] } / idx.size }))
