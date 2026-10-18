@@ -163,16 +163,15 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 val calibration = calibrations[calibrationKey]
                 val pending = pendingCounts[calibrationKey] ?: 0
                 val pendingText = if (pending > 0) {
-                    "\n$pending coasting samples from earlier rides wait for the next fit (needs ${CoastFitter.MIN_FIT_SAMPLES}+ over a range of speeds)."
+                    "\n$pending coasting samples from earlier rides wait for the next fit (needs ${CoastFitter.MIN_FIT_SAMPLES}+)."
                 } else ""
                 val text = if (calibration == null) {
                     "Learned: no fit yet for these values. Cd × Area and Crr above are used." + pendingText
                 } else {
-                    val crrEff = calibration.crr * surface.factor
-                    "Learned CdA %.3f (Cd × Area above: %.3f)\nLearned Crr %.4f (effective on surface %.4f)\n%d samples over %d rides".format(
+                    "Learned CdA %.3f (Cd × Area above: %.3f)\nCrr is not learned: the Crr above is used\n%d samples over %d rides".format(
                         calibration.cdA,
                         dragCoefficient.toDoubleLocale() * frontalArea.toDoubleLocale(),
-                        calibration.crr, crrEff, calibration.samples, calibration.rides
+                        calibration.samples, calibration.rides
                     ) + pendingText + if (autoCalibrate) "" else "\nNot used while auto-calibrate is off."
                 }
                 Text(text, style = MaterialTheme.typography.bodySmall)
