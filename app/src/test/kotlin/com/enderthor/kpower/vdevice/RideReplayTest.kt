@@ -88,7 +88,9 @@ class RideReplayTest {
         val pedalling = rows.indices.filter { (rows[it].cadence ?: 0.0) >= 22 }
         println("  $name: 60+ rpm under 40 W ${pct(hard.count { p[it] < 40 }, hard.size)} (descents ${pct(hardDown.count { p[it] < 40 }, hardDown.size)}), " +
             "at 0 W ${pct(hard.count { p[it] == 0.0 }, hard.size)}, above 450 W ${p.count { it > 450 }} s, " +
-            "mean pedalling %.0f W".format(pedalling.sumOf { p[it] } / pedalling.size))
+            "mean pedalling %.0f W, highest %.0f W, above the soft cap's knee %d s".format(
+                pedalling.sumOf { p[it] } / pedalling.size, p.max(),
+                p.count { it > CyclingWattageEstimator.SOFT_CAP_KNEE * maxOf(1.7 * config.ftp.toDouble(), 790.0) }))
     }
 
     private fun pct(n: Int, of: Int) = if (of == 0) "-" else "%.1f%%".format(100.0 * n / of)

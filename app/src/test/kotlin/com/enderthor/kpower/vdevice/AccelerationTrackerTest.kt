@@ -42,8 +42,31 @@ class AccelerationTrackerTest {
 
     @Test
     fun spikeIsClamped() {
+        sample(0, 5.0)
+        assertEquals(AccelerationTracker.MAX_ACCELERATION, sample(1000, 15.0), 1e-9)
+    }
+
+    @Test
+    fun movingOffAssumesABriskStart() {
+        // Dense readings while stopped, then the sensor jumps to 3.2 m/s (11.6 km/h)
+        for (i in 0..19) sample(i * 1000L, 0.0)
+        sample(20_000, 3.22)
+        assertEquals(AccelerationTracker.START_ACCELERATION, sample(21_000, 3.19), 0.05)
+    }
+
+    @Test
+    fun movingOffAfterSparseReadingsAssumesABriskStart() {
+        // Standing still with no new readings for 8 s: the window has forgotten the stop
         sample(0, 0.0)
-        assertEquals(AccelerationTracker.MAX_ACCELERATION, sample(1000, 10.0), 1e-9)
+        sample(1000, 0.0)
+        assertEquals(AccelerationTracker.START_ACCELERATION, sample(9000, 3.22), 0.05)
+    }
+
+    @Test
+    fun movingOffAfterTheSourceSwitchedStillCountsAsAStart() {
+        sample(0, 0.0)
+        tracker.reset() // the Karoo switched to GPS speed and back
+        assertEquals(AccelerationTracker.START_ACCELERATION, sample(1000, 3.22), 0.05)
     }
 
     @Test
