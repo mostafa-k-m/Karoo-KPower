@@ -16,11 +16,7 @@ import com.enderthor.kpower.data.OpenWeatherCurrentWeatherResponse
 import com.enderthor.kpower.data.HeadwindStats
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.OpenMeteoData
-import com.enderthor.kpower.data.RETRY_CHECK_STREAMS
-import com.enderthor.kpower.data.STREAM_TIMEOUT
 import com.enderthor.kpower.data.StreamData
-import com.enderthor.kpower.data.WAIT_STREAMS_LONG
-import com.enderthor.kpower.data.WAIT_STREAMS_MEDIUM
 import com.enderthor.kpower.data.WAIT_STREAMS_SHORT
 import com.enderthor.kpower.data.defaultConfigData
 import com.enderthor.kpower.vdevice.CoastSample
@@ -486,84 +482,11 @@ inline fun <reified T : KarooEvent> KarooSystemService.consumerFlow(): Flow<T> {
 
 
 
-@OptIn(FlowPreview::class)
 fun KarooSystemService.streamDataMonitorFlow(
     dataTypeID: String,
     noCheck: Boolean = false
-): Flow<StreamState> = flow {
-
-    if (noCheck) {
-        streamDataFlow(dataTypeID).collect { emit(it) }
-        return@flow
-    }
-
-    var retryAttempt = 0
-
-
-    val initialState = StreamState.Streaming(
-        DataPoint(
-            dataTypeId = dataTypeID,
-            values = mapOf(DataType.Field.SINGLE to 0.0)
-        )
-    )
-
-    emit(initialState)
-
-    while (currentCoroutineContext().isActive) {
-        try {
-            streamDataFlow(dataTypeID)
-                .distinctUntilChanged()
-                .timeout(STREAM_TIMEOUT.milliseconds)
-                .collect { state ->
-                    when (state) {
-                        is StreamState.Idle -> {
-                            Timber.w("Stream estado inactivo: $dataTypeID, esperando...")
-                            if (dataTypeID == DataType.Type.SPEED) emit(initialState)
-                            delay(WAIT_STREAMS_SHORT)
-                        }
-                        is StreamState.NotAvailable -> {
-                            Timber.w("Stream estado NotAvailable: $dataTypeID, esperando...")
-                            emit(initialState)
-                            delay(WAIT_STREAMS_SHORT * 2)
-                        }
-                        is StreamState.Searching -> {
-                            Timber.w("Stream estado searching: $dataTypeID, esperando...")
-                            emit(initialState)
-                            delay(WAIT_STREAMS_SHORT/2)
-                        }
-                        else -> {
-                            retryAttempt = 0
-                            Timber.d("Stream estado: $state")
-                            emit(state)
-                        }
-                    }
-                }
-
-        } catch (e: Exception) {
-            when (e) {
-                is TimeoutCancellationException -> {
-                    if (retryAttempt++ < RETRY_CHECK_STREAMS) {
-                        val backoffDelay = (1000L * (1 shl retryAttempt))
-                            .coerceAtMost(WAIT_STREAMS_MEDIUM)
-                        Timber.w("Timeout/Cancel en stream $dataTypeID, reintento $retryAttempt en ${backoffDelay}ms. Motivo $e")
-                        delay(backoffDelay)
-                    } else {
-                        Timber.e("Máximo de reintentos alcanzado")
-                        retryAttempt = 0
-                        delay(WAIT_STREAMS_LONG)
-                    }
-                }
-                is CancellationException -> {
-                    Timber.d("Cancelación ignorada en streamDataFlow")
-                }
-                else -> {
-                    Timber.e(e, "Error en stream")
-                    delay(WAIT_STREAMS_LONG)
-                }
-            }
-        }
-    }
-}
+): Flow<StreamState> =
+    if (noCheck) streamDataFlow(dataTypeID) else monitoredStream(dataTypeID, { streamDataFlow(dataTypeID) })
 
 
 
