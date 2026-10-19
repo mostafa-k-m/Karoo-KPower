@@ -7,6 +7,7 @@
 > - **No hard limits.** Readings never go below 0 W, and near the top they bend smoothly towards the cap (1.7 × FTP or 790 W, whichever is higher) instead of sitting flat on it.
 > - **Gearing (optional).** Enter your hub (Shimano Nexus 8 / Alfine 8, Rohloff 14, or your own ratios) and chainring and sprocket teeth. With cadence and speed sensors, KPower recognises when a gear is driving the wheel and then low readings bend towards a floor (default 30 W) instead of dropping to 0 W on descents. The wheel size is learned from riding.
 > - **Coast calibration (optional).** With a cadence sensor and a paired speed sensor, freewheeling stretches are used to learn CdA, slowly and within 0.3–1.0, separately for each setup (e.g. summer and winter). Crr comes from your settings: use your tyre's measured value, e.g. from bicyclerollingresistance.com.
+> - **Riding off after a long stop works.** The original stream watchdog treated a speed that doesn't change (a bike standing still) as a dead stream and, after a minute and a half, stopped listening for two minutes, so power read 0 W. Quiet streams are now just re-subscribed.
 > - "Ignore low cadence" is shown as **Use cadence sensor**; saved settings keep their meaning.
 > - Updates come from [this fork's releases](https://github.com/mostafa-k-m/Karoo-KPower/releases/latest). Coming from the original KPower, uninstall it first: the signing keys differ.
 >

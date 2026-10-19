@@ -11,8 +11,6 @@ import kotlinx.serialization.json.Json
 
 
 
-const val RETRY_CHECK_STREAMS = 4
-const val WAIT_STREAMS_LONG = 120000L // 120 seconds
 const val WAIT_STREAMS_MEDIUM = 10000L // 10 seconds
 const val WAIT_STREAMS_SHORT = 3000L // 3 seconds
 const val STREAM_TIMEOUT = 20000L // 20 seconds
