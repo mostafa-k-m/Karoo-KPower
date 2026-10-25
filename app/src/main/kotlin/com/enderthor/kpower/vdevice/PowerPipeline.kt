@@ -147,7 +147,7 @@ class PowerPipeline(now: () -> Long = SystemClock::elapsedRealtime) {
     companion object {
         /**
          * A descent's gravity term is large next to the rider's power, and the altitude behind it lags
-         * and is noisy: replayed rides read 0 W for a quarter of the pedalling on descents. Taking 80%
+         * and is noisy: replayed rides often read 0 W while pedalling on descents. Taking 80%
          * of a negative slope matched a lag-free grade best; climbs are left as they are. Kept with
          * gravity from the climb rate, where an energy check on descents can't see braking.
          */

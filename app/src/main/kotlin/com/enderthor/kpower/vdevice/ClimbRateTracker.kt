@@ -45,7 +45,7 @@ class ClimbRateTracker(
     fun reset() = samples.clear()
 
     companion object {
-        // Best of 4–12 s on replayed rides: climbs within ~3 W of the energy they took
+        // Of 4–12 s, closest to an energy check on replayed climbs
         const val WINDOW_MS = 6000L
         const val MIN_SPAN_MS = 3000L
         const val MAX_GAP_MS = 5000L

@@ -99,7 +99,7 @@ class CyclingWattageEstimatorTest {
             clock = i * 1000L
             val a = tracker.update(v / 3.6)
             CyclingWattageEstimator(
-                slope = 0.0, totalMass = 120.0, rollingResistanceCoefficient = 0.007, dragCoefficient = 0.9,
+                slope = 0.0, totalMass = 100.0, rollingResistanceCoefficient = 0.007, dragCoefficient = 0.9,
                 frontalArea = 0.65, speed = v / 3.6, windSpeed = 0.0, powerLoss = 0.06, elevation = 30.0,
                 ftp = 200.0, cadence = 70.0, surface = 0.75, isforcepower = false, acceleration = a,
             ).calculateCyclingWattage()

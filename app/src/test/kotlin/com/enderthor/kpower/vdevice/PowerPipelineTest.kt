@@ -37,7 +37,7 @@ class PowerPipelineTest {
         (0..19).forEach { reading(it, 0.0, cadence = 0.0) }
         val start = (20..29).map { reading(it, 12.0) }
         val steady = (30..45).map { reading(it, 12.0) }.last()
-        // 0.7 m/s² for 100 kg at 3.2 m/s is ~240 W on top of the ~40 W to hold the speed
+        // 0.7 m/s² for 102 kg at 3.3 m/s is ~250 W on top of the ~40 W to hold the speed
         assertTrue("start: $start", start.max() in 200.0..400.0)
         assertEquals(steady, start.last(), 150.0)
     }

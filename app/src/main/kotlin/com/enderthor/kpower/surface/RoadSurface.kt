@@ -5,10 +5,10 @@ import com.enderthor.kpower.data.KarooSurface
 /**
  * Surface class of the road under the wheels, as read from the Karoo's offline map, with the
  * factor it multiplies the config's Crr by. Paved matches the manual Asphalt setting. The unpaved
- * ones are steeper than the manual settings (Standard is 1.24× Asphalt, Mountain Mix 1.4×): on a
- * replayed mixed ride, heart rate and cadence on flat compact paths and gravel matched flat
- * asphalt while those settings put power 35 W lower, which takes about 2.3× Asphalt to explain.
- * Compact and Gravel sit a little below that until more rides confirm it.
+ * ones are steeper than the manual settings (Standard is 1.24× Asphalt, Mountain Mix 1.4×), which
+ * replayed mixed rides showed under-reading flat compact paths and gravel; published rolling
+ * resistance for touring tyres off asphalt is about 2× or more. Compact and Gravel sit a little
+ * below that until more rides confirm it.
  */
 enum class RoadSurface(val label: String, val factor: Double?, val fitCode: Int) {
     UNKNOWN("-", null, 0),
