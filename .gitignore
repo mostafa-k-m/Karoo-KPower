@@ -25,3 +25,8 @@ local.properties
 /.idea/inspectionProfiles/Project_Default.xml
 /.idea/runConfigurations.xml
 /.idea/vcs.xml
+
+# Ride data and rider settings never go in the repository (see AGENTS.md)
+*.fit
+*.gpx
+/rides/
