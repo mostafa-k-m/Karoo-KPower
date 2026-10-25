@@ -8,7 +8,7 @@ import java.io.File
 
 /**
  * Roads around a position from the Karoo's own offline maps (Mapsforge files the Karoo downloads
- * per region). Reading needs "all files access" ([hasAccess]); without it, or without maps,
+ * per region). Reading needs the storage permission ([hasAccess]); without it, or without maps,
  * [status] says so and [waysAround] returns nothing.
  */
 class OfflineMapSource(
@@ -32,7 +32,8 @@ class OfflineMapSource(
 
     @Synchronized
     fun status(): Status {
-        if (!hasAccess()) return Status.NoAccess
+        // A folder that exists but can't be listed means the permission (and its group) is missing
+        if (!hasAccess() || (dir.exists() && dir.listFiles() == null)) return Status.NoAccess
         val files = openMaps()
         return if (files.isEmpty()) Status.NoMaps else Status.Ready(mapNames)
     }

@@ -3,8 +3,6 @@ package com.enderthor.kpower.surface
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Environment
 import androidx.core.content.ContextCompat
 import com.enderthor.kpower.extension.loadPreferencesFlow
 import com.enderthor.kpower.extension.streamLocation
@@ -54,9 +52,9 @@ object SurfaceTracker {
     private val mutableState = MutableStateFlow(SurfaceState())
     val state: StateFlow<SurfaceState> = mutableState.asStateFlow()
 
+    // The offline map folder is readable only with the sdcard_rw group, which comes with this permission
     fun hasMapAccess(context: Context): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Environment.isExternalStorageManager()
-        else ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun start(context: Context, karooSystem: KarooSystemService, scope: CoroutineScope): Job {

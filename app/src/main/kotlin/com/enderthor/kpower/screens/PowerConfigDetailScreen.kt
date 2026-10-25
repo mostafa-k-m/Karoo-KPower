@@ -127,7 +127,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             if (autoSurface) {
                 val status = when (val st = mapStatus) {
                     null -> "Checking the offline maps…"
-                    OfflineMapSource.Status.NoAccess -> "No access to the offline maps yet. Grant it once over adb:\nadb shell appops set --uid com.enderthor.kpower MANAGE_EXTERNAL_STORAGE allow"
+                    OfflineMapSource.Status.NoAccess -> "No access to the offline maps yet. Grant it once over adb:\nadb shell pm grant com.enderthor.kpower android.permission.WRITE_EXTERNAL_STORAGE"
                     OfflineMapSource.Status.NoMaps -> "No offline maps found. Download a region in the Karoo's map settings."
                     is OfflineMapSource.Status.Ready -> "Maps: ${st.maps.joinToString()}" +
                         if (surfaceState.enabled) "\nNow: ${surfaceState.fieldText}" else ""
