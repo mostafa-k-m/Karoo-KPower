@@ -64,6 +64,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var autoSurface by remember { mutableStateOf(configdata.autoSurface) }
     var windFactor by remember { mutableStateOf(configdata.windFactor) }
     var logMotion by remember { mutableStateOf(configdata.logMotion) }
+    var snowAdjust by remember { mutableStateOf(configdata.snowAdjust) }
     val surfaceState by SurfaceTracker.state.collectAsState()
     var mapStatus by remember { mutableStateOf<OfflineMapSource.Status?>(null) }
     LaunchedEffect(autoSurface) {
@@ -77,7 +78,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
 
     fun getUpdatedConfigData(): ConfigData = ConfigData(
         configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient, frontalArea, powerLoss, headwind, isOpenWeather, apikey,ftp,surface,isforcepower,autoCalibrate,
-        gearHub, chainrings, sprockets, customHubRatios, pedallingFloor, autoSurface, windFactor, logMotion
+        gearHub, chainrings, sprockets, customHubRatios, pedallingFloor, autoSurface, windFactor, logMotion, snowAdjust
     )
 
     Column(modifier = Modifier
@@ -177,6 +178,12 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 })
                 Spacer(modifier = Modifier.width(10.dp))
                 Text("OpenMeteo or OpenWeather(checked)?")
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = snowAdjust, onCheckedChange = { snowAdjust = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("More rolling resistance with snow on the ground? (snow depth from Open-Meteo)")
             }
 
             OutlinedTextField(value = windFactor, modifier = Modifier.fillMaxWidth(),

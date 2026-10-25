@@ -1,5 +1,7 @@
 package com.enderthor.kpower.data
 
+import com.enderthor.kpower.surface.RoadSurface
+
 
 import com.enderthor.kpower.extension.HeadingResponse
 import com.enderthor.kpower.extension.toDoubleLocale
@@ -90,6 +92,8 @@ data class ConfigData(
     val windFactor: String = DEFAULT_WIND_FACTOR,
     // Write the accelerometer's per-second means into the ride file, for tuning
     val logMotion: Boolean = false,
+    // More rolling resistance while the weather reports snow on the ground
+    val snowAdjust: Boolean = true,
     ) {
     // Stored inverted as isforcepower so configs saved by older versions keep their meaning
     val useCadenceSensor: Boolean get() = !isforcepower
@@ -107,7 +111,7 @@ data class ConfigData(
 
     // With the surface from the map, coasting is only learned on paved roads, so one Crr fits all samples
     val coastSurfaceFactor: Double
-        get() = if (autoSurface) KarooSurface.ASPHALT.factor else surface.factor
+        get() = if (autoSurface) RoadSurface.PAVED.factor!! else surface.factor
 
     /**
      * Wheel turns per crank turn in every gear, or empty when the gearing isn't entered.

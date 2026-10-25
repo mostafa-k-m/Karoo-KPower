@@ -66,6 +66,8 @@ class CoastDetector(private val now: () -> Long = SystemClock::elapsedRealtime) 
         val slope: Double,        // rise / run
         val headwind: Double,     // m/s
         val elevation: Double,    // m
+        val airTemperatureC: Double? = null,
+        val seaLevelPressurePa: Double? = null,
         val totalMass: Double,    // kg
         val cdA: Double,          // values currently used, to recognise braking
         val crrEff: Double,
@@ -106,7 +108,7 @@ class CoastDetector(private val now: () -> Long = SystemClock::elapsedRealtime) 
             acceleration = input.acceleration,
             slope = input.slope,
             headwind = input.headwind,
-            airDensity = CyclingWattageEstimator.airDensity(input.elevation),
+            airDensity = CyclingWattageEstimator.airDensity(input.elevation, input.airTemperatureC, input.seaLevelPressurePa),
             totalMass = input.totalMass,
         )
         if (sample.resistanceForce - sample.predictedForce(input.cdA, input.crrEff) > BRAKING_MARGIN_N) {

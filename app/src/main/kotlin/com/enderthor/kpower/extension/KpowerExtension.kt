@@ -131,15 +131,31 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                         }
                     }
 
-                    response
+                    // OpenWeather has no snow depth: ask Open-Meteo for it too when snow is taken into account
+                    val snowResponse = if (preferences[0].isOpenWeather && preferences[0].snowAdjust) {
+                        try { karooSystem.makeOpenMeteoHttpRequest(gps, false, "").takeIf { it.error == null } } catch (e: Exception) { null }
+                    } else null
+
+                    response to snowResponse
                 }
                 .retry(Long.MAX_VALUE) { delay(1.minutes); true }
-                .collect { response ->
+                .collect { (response, snowResponse) ->
                     try {
                         val responseString = String(response.body ?: ByteArray(0))
                         Timber.d("Got response: $responseString")
-                        val data = parseWeatherResponse(responseString)
-                            //jsonWithUnknownKeys.decodeFromString<OpenMeteoCurrentWeatherResponse>(responseString)
+                        var data = parseWeatherResponse(responseString)
+                        snowResponse?.body?.let { body ->
+                            try {
+                                val extra = parseWeatherResponse(String(body)).current
+                                data = data.copy(current = data.current.copy(
+                                    snowDepth = extra.snowDepth,
+                                    temperature = data.current.temperature ?: extra.temperature,
+                                    pressureMsl = data.current.pressureMsl ?: extra.pressureMsl,
+                                ))
+                            } catch (e: Exception) {
+                                Timber.e("Failed to read snow depth $e")
+                            }
+                        }
                         saveCurrentData(applicationContext, data)
                     } catch(e: Exception){
                         Timber.e("Failed to read current weather data $e")
@@ -169,6 +185,10 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
     // While a ride records: the detected surface into each record, to check it against the road afterwards
     override fun startFit(emitter: Emitter<FitEffect>) {
         var motion: MotionLogger? = null
+        var weather: com.enderthor.kpower.data.OpenMeteoData? = null
+        val weatherJob = CoroutineScope(Dispatchers.IO).launch {
+            try { streamCurrentWeatherData().collect { weather = it.current } } catch (e: Exception) { Timber.e(e, "Weather for the FIT stopped") }
+        }
         val job = CoroutineScope(Dispatchers.IO).launch {
             val logMotion = try { loadPreferencesFlow().first().firstOrNull()?.logMotion == true } catch (e: Exception) { false }
             if (logMotion) motion = MotionLogger(applicationContext).takeIf { it.start() }
@@ -178,6 +198,10 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
                 if (state.enabled) {
                     values += FieldValue(SURFACE_FIELD, state.surface.fitCode.toDouble())
                     state.factor?.let { values += FieldValue(SURFACE_FACTOR_FIELD, it) }
+                }
+                weather?.let { w ->
+                    w.temperature?.let { values += FieldValue(AIR_TEMP_FIELD, it) }
+                    w.snowDepth?.let { values += FieldValue(SNOW_DEPTH_FIELD, it) }
                 }
                 motion?.take()?.let { m ->
                     values += FieldValue(ACCEL_X_FIELD, m.x)
@@ -191,6 +215,7 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         }
         emitter.setCancellable {
             job.cancel()
+            weatherJob.cancel()
             motion?.stop()
         }
     }
@@ -210,5 +235,8 @@ class KpowerExtension : KarooExtension("kpower", BuildConfig.VERSION_NAME)
         val ACCEL_Y_FIELD = DeveloperField(3, 136, "accel_y", "m/s2", null, 0)
         val ACCEL_Z_FIELD = DeveloperField(4, 136, "accel_z", "m/s2", null, 0)
         val ACCEL_SAMPLES_FIELD = DeveloperField(5, 132, "accel_samples", "", null, 0)
+        // The weather KPower used: air temperature and snow depth on the ground
+        val AIR_TEMP_FIELD = DeveloperField(6, 136, "weather_temp", "C", null, 0)
+        val SNOW_DEPTH_FIELD = DeveloperField(7, 136, "snow_depth", "m", null, 0)
     }
 }

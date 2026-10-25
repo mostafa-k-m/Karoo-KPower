@@ -26,7 +26,10 @@ class CyclingWattageEstimator(
     private val isforcepower: Boolean,
     private val acceleration: Double = 0.0,
     // While a gear is driving the wheel the rider is pushing, so the reading shouldn't drop to 0 W
-    private val minPower: Double = 0.0
+    private val minPower: Double = 0.0,
+    // Weather: air temperature and pressure reduced to sea level; null = the standard atmosphere
+    private val airTemperatureC: Double? = null,
+    private val seaLevelPressurePa: Double? = null,
 ) {
 
     fun smoothPower(estimatedPower: Double): Double {
@@ -74,7 +77,7 @@ class CyclingWattageEstimator(
     }
 
     private fun calculateAerodynamicDragForce(): Double {
-        return (0.5 * dragCoefficient * frontalArea * airDensity(elevation) * (speed + windSpeed).pow(2))   // windspeed is positive because it is a headwind
+        return (0.5 * dragCoefficient * frontalArea * airDensity(elevation, airTemperatureC, seaLevelPressurePa) * (speed + windSpeed).pow(2))   // windspeed is positive because it is a headwind
     }
 
     companion object {
@@ -82,7 +85,21 @@ class CyclingWattageEstimator(
         const val GRAVITY = 9.80665
         const val DYNAMIC_ROLLING_FORCE_N = 0.1
 
-        fun airDensity(elevation: Double): Double = 1.225 * exp(-0.00011856 * elevation)
+        private const val R_AIR = 287.05 // J/(kg·K), dry air
+
+        /**
+         * Air density (kg/m³) at [elevation] m. With the weather's temperature and sea-level pressure it
+         * is the ideal gas law, with the pressure brought down to the rider's altitude for that
+         * temperature, so a climb keeps its thinner air (a station pressure from one weather grid point
+         * would hold for the whole ride). Without them, the standard atmosphere at 15 °C as before.
+         * Cold air is denser: about 10% more drag at -10 °C than at +15 °C.
+         */
+        fun airDensity(elevation: Double, temperatureC: Double? = null, seaLevelPressurePa: Double? = null): Double {
+            if (temperatureC == null && seaLevelPressurePa == null) return 1.225 * exp(-0.00011856 * elevation)
+            val tempK = (temperatureC ?: 15.0) + 273.15
+            val pressure = (seaLevelPressurePa ?: 101_325.0) * exp(-GRAVITY * elevation / (R_AIR * tempK))
+            return pressure / (R_AIR * tempK)
+        }
 
         const val SOFT_CAP_KNEE = 0.6
 

@@ -63,9 +63,9 @@ class PowerPipelineTest {
         val paved = steady(RoadSurface.PAVED.factor)
         val gravel = steady(RoadSurface.GRAVEL.factor)
         // No road on the map: the config's surface (Asphalt here) is used
-        assertEquals(paved, steady(null), 1e-9)
-        // Rolling resistance 100 kg × g × 0.007 × (1.45 − 0.75) ≈ 4.8 N more, × 5.6 m/s / 0.95
-        assertEquals(28.3, gravel - paved, 0.5)
+        assertEquals(steady(KarooSurface.ASPHALT.factor), steady(null), 1e-9)
+        // Rolling resistance 100 kg × g × 0.007 × (1.45 − 0.85) ≈ 4.1 N more, × 5.6 m/s / 0.95
+        assertEquals(24.1, gravel - paved, 0.5)
     }
 
     @Test
@@ -140,4 +140,26 @@ class PowerPipelineTest {
     private companion object {
         const val SENSOR = "11111-111-1"
     }
+
+    @Test
+    fun snowAddsRollingResistance() {
+        assertEquals(1.0, PowerPipeline.snowFactor(null, 0.85), 0.0)
+        assertEquals(1.0, PowerPipeline.snowFactor(0.005, 0.85), 0.0)
+        assertEquals(PowerPipeline.SNOW_PAVED, PowerPipeline.snowFactor(0.05, 0.85), 0.0)
+        assertEquals(1.75, PowerPipeline.snowFactor(0.05, 1.45), 1e-9)
+        assertEquals(2.5, PowerPipeline.snowFactor(0.30, 1.45), 1e-9)
+        assertEquals(1.0, PowerPipeline.snowFactor(0.30, 2.2), 0.0)
+
+        fun steady(snow: Double?, adjust: Boolean = true): Double {
+            val p = PowerPipeline { clock }
+            val s = setup.copy(config = setup.config.copy(snowAdjust = adjust))
+            return (0..10).map { clock = it * 1000L; p.update(PowerInputs(20 / 3.6, SENSOR, 80.0, "cad", 0.0, 30.0, 0.0, snowDepth = snow), s) }.last()
+        }
+        val bare = steady(null)
+        // Asphalt setting (0.75) counts as paved: rolling resistance ×1.25
+        val rolling = 100 * 9.80665 * 0.007 * 0.75 * (20 / 3.6) / 0.95
+        assertEquals(rolling * 0.25, steady(0.05) - bare, 0.5)
+        assertEquals(bare, steady(0.05, adjust = false), 1e-9)
+    }
+
 }

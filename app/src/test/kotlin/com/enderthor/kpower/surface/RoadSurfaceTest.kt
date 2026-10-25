@@ -3,6 +3,7 @@ package com.enderthor.kpower.surface
 import com.enderthor.kpower.data.KarooSurface
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RoadSurfaceTest {
@@ -41,7 +42,7 @@ class RoadSurfaceTest {
     fun rougherSurfacesRollHarder() {
         val factors = listOf(RoadSurface.PAVED, RoadSurface.COMPACT, RoadSurface.GRAVEL, RoadSurface.SOFT).map { it.factor!! }
         assertEquals(factors.sorted(), factors)
-        assertEquals(KarooSurface.ASPHALT.factor, RoadSurface.PAVED.factor!!, 0.0)
+        assertTrue(RoadSurface.PAVED.factor!! > KarooSurface.ASPHALT.factor)
         assertNull(RoadSurface.UNKNOWN.factor)
     }
 

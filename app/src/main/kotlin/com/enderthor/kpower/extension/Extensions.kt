@@ -259,7 +259,9 @@ fun Context.parseWeatherResponse(responseString: String): OpenMeteoCurrentWeathe
                     windSpeed = weather.wind.speed,
                     windDirection = weather.wind.deg,
                     time = weather.time,
-                    interval = 0
+                    interval = 0,
+                    temperature = weather.main?.temp?.minus(273.15),
+                    pressureMsl = weather.main?.pressure,
                 ),
                 latitude = weather.coord.lat,
                 longitude = weather.coord.lon,
@@ -282,7 +284,7 @@ suspend fun KarooSystemService.makeOpenMeteoHttpRequest(gpsCoordinates: GpsCoord
     return callbackFlow {
 
         val url = if(isOpenWeather && api.trim().isNotEmpty())  "https://api.openweathermap.org/data/2.5/weather?lat=${gpsCoordinates.lat}&lon=${gpsCoordinates.lon}&appid=$api"
-        else "https://api.open-meteo.com/v1/forecast?latitude=${gpsCoordinates.lat}&longitude=${gpsCoordinates.lon}&current=wind_speed_10m,wind_direction_10m&timeformat=unixtime&wind_speed_unit=ms"
+        else "https://api.open-meteo.com/v1/forecast?latitude=${gpsCoordinates.lat}&longitude=${gpsCoordinates.lon}&current=wind_speed_10m,wind_direction_10m,temperature_2m,pressure_msl,snow_depth&timeformat=unixtime&wind_speed_unit=ms"
 
         Timber.d("Http request to ${url}...")
 

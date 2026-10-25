@@ -134,4 +134,22 @@ class CyclingWattageEstimatorTest {
         // A strong rider's ceiling follows FTP
         assertEquals(400.0 * 1.7, CyclingWattageEstimator.softCap(1e6, 400.0 * 1.7), 1e-6)
     }
+
+    @Test
+    fun airDensityFromWeather() {
+        // Without weather: the standard atmosphere as before
+        assertEquals(1.225, CyclingWattageEstimator.airDensity(0.0), 1e-9)
+        // 15 °C and standard pressure give the same at sea level and at altitude
+        assertEquals(1.225, CyclingWattageEstimator.airDensity(0.0, 15.0, 101_325.0), 1e-3)
+        assertEquals(CyclingWattageEstimator.airDensity(1000.0), CyclingWattageEstimator.airDensity(1000.0, 15.0, 101_325.0), 1e-3)
+        // Cold air is about 10% denser, so drag rises with it
+        val cold = CyclingWattageEstimator.airDensity(0.0, -10.0, 101_325.0)
+        assertEquals(1.342, cold, 2e-3)
+        val warm = estimator(speed = 10.0).calculateCyclingWattage()
+        val colder = CyclingWattageEstimator(slope = 0.0, totalMass = 100.0, rollingResistanceCoefficient = 0.005, dragCoefficient = 1.0,
+            frontalArea = 0.5, speed = 10.0, windSpeed = 0.0, powerLoss = 0.0, elevation = 0.0, ftp = 300.0, cadence = 90.0,
+            surface = 1.0, isforcepower = false, airTemperatureC = -10.0, seaLevelPressurePa = 101_325.0).calculateCyclingWattage()
+        assertEquals(30.625 * 10.0 * (cold / 1.225 - 1), colder - warm, 0.5)
+    }
+
 }
