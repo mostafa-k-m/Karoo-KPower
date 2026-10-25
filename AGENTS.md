@@ -14,11 +14,11 @@ Personal data includes, about the rider or their rides:
 - body data: weight, height, age, heart rate, FTP or any other fitness figure
 - ride details: distances, durations, dates, times, speeds, power or heart-rate values, and
   anything else measured on a specific ride, even rounded or as an example ("on an N km ride",
-  "12 km/h at a junction", "heart rate rose by Y bpm")
+  "X km/h at a junction", "heart rate rose by Y bpm")
 - location: coordinates, routes, place or street names, regions, the country, and terrain
   descriptions that identify where they ride
-- equipment: bike make and model, components, gearing, tyres, accessories, sensor makes, models
-  and IDs
+- device identifiers: sensor IDs, serial numbers and anything else that singles out one device
+  (naming equipment in general, such as a sensor model or a hub type, is fine)
 - identity and accounts: names, emails, usernames other than the repository owner's GitHub
   handle, API keys, tokens and passwords
 
