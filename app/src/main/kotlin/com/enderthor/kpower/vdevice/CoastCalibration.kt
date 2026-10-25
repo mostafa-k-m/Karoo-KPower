@@ -66,6 +66,8 @@ class CoastDetector(private val now: () -> Long = SystemClock::elapsedRealtime) 
         val slope: Double,        // rise / run
         val headwind: Double,     // m/s
         val elevation: Double,    // m
+        val airTemperatureC: Double? = null,
+        val seaLevelPressurePa: Double? = null,
         val totalMass: Double,    // kg
         val cdA: Double,          // values currently used, to recognise braking
         val crrEff: Double,
@@ -106,7 +108,7 @@ class CoastDetector(private val now: () -> Long = SystemClock::elapsedRealtime) 
             acceleration = input.acceleration,
             slope = input.slope,
             headwind = input.headwind,
-            airDensity = CyclingWattageEstimator.airDensity(input.elevation),
+            airDensity = CyclingWattageEstimator.airDensity(input.elevation, input.airTemperatureC, input.seaLevelPressurePa),
             totalMass = input.totalMass,
         )
         if (sample.resistanceForce - sample.predictedForce(input.cdA, input.crrEff) > BRAKING_MARGIN_N) {
@@ -203,6 +205,14 @@ object CoastFitter {
         return Fit(cdA, kept.size)
     }
 
+    /**
+     * Whether a fit is believable for the setup the rider entered. Coasting on everyday roads can be
+     * biased as a whole (grade lag, wind, a sensor that smooths speed), and a biased fit would pull
+     * the learned value away a little every ride; such a fit is dropped rather than clamped.
+     */
+    fun isPlausible(fit: Fit, configCdA: Double): Boolean =
+        fit.cdA in CDA_RANGE && fit.cdA in configCdA * MIN_CONFIG_RATIO..configCdA * MAX_CONFIG_RATIO
+
     /** Moves the stored CdA a step towards [fit], so one odd ride can't swing it */
     fun blend(current: CoastCalibration?, fit: Fit, configCdA: Double): CoastCalibration {
         val oldCdA = current?.cdA ?: configCdA
@@ -239,4 +249,6 @@ object CoastFitter {
     const val MAX_BLEND = 0.25
     const val FULL_WEIGHT_SAMPLES = 200.0
     val CDA_RANGE = 0.3..1.0
+    const val MIN_CONFIG_RATIO = 0.75
+    const val MAX_CONFIG_RATIO = 1.33
 }

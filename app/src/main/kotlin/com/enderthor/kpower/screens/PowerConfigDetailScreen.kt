@@ -26,7 +26,11 @@ import com.enderthor.kpower.extension.resetCalibration
 import com.enderthor.kpower.extension.toDoubleLocale
 import com.enderthor.kpower.vdevice.CoastFitter
 import io.hammerhead.karooext.KarooSystemService
+import com.enderthor.kpower.surface.OfflineMapSource
+import com.enderthor.kpower.surface.SurfaceTracker
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,6 +61,15 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
     var sprockets by remember { mutableStateOf(configdata.sprockets) }
     var customHubRatios by remember { mutableStateOf(configdata.customHubRatios) }
     var pedallingFloor by remember { mutableStateOf(configdata.pedallingFloor) }
+    var autoSurface by remember { mutableStateOf(configdata.autoSurface) }
+    var windFactor by remember { mutableStateOf(configdata.windFactor) }
+    var logMotion by remember { mutableStateOf(configdata.logMotion) }
+    var snowAdjust by remember { mutableStateOf(configdata.snowAdjust) }
+    val surfaceState by SurfaceTracker.state.collectAsState()
+    var mapStatus by remember { mutableStateOf<OfflineMapSource.Status?>(null) }
+    LaunchedEffect(autoSurface) {
+        mapStatus = withContext(Dispatchers.IO) { OfflineMapSource(hasAccess = { SurfaceTracker.hasMapAccess(ctx) }).status() }
+    }
     val gearChecks by remember { ctx.loadGearCheckFlow() }.collectAsState(initial = emptyMap())
     val calibrations by remember { ctx.loadCalibrationFlow() }.collectAsState(initial = emptyMap())
     val pendingCounts by remember { ctx.loadPendingCoastCountFlow() }.collectAsState(initial = emptyMap())
@@ -65,7 +78,7 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
 
     fun getUpdatedConfigData(): ConfigData = ConfigData(
         configdata.id, title, isActive, bikeMass, rollingResistanceCoefficient, dragCoefficient, frontalArea, powerLoss, headwind, isOpenWeather, apikey,ftp,surface,isforcepower,autoCalibrate,
-        gearHub, chainrings, sprockets, customHubRatios, pedallingFloor
+        gearHub, chainrings, sprockets, customHubRatios, pedallingFloor, autoSurface, windFactor, logMotion, snowAdjust
     )
 
     Column(modifier = Modifier
@@ -104,6 +117,22 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                     surface =
                         KarooSurface.entries.find { unit -> unit.factor.toString() == selectedOption.id }!!
                 }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = autoSurface, onCheckedChange = { autoSurface = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Detect surface from the Karoo's offline map? (the surface above is used where the map has no road)")
+            }
+            if (autoSurface) {
+                val status = when (val st = mapStatus) {
+                    null -> "Checking the offline maps…"
+                    OfflineMapSource.Status.NoAccess -> "No access to the offline maps yet. Grant it once over adb:\nadb shell appops set --uid com.enderthor.kpower MANAGE_EXTERNAL_STORAGE allow"
+                    OfflineMapSource.Status.NoMaps -> "No offline maps found. Download a region in the Karoo's map settings."
+                    is OfflineMapSource.Status.Ready -> "Maps: ${st.maps.joinToString()}" +
+                        if (surfaceState.enabled) "\nNow: ${surfaceState.fieldText}" else ""
+                }
+                Text(status + "\nMap data © OpenStreetMap contributors", style = MaterialTheme.typography.bodySmall)
             }
 
             OutlinedTextField(value = dragCoefficient, modifier = Modifier.fillMaxWidth(),
@@ -152,6 +181,20 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = snowAdjust, onCheckedChange = { snowAdjust = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("More rolling resistance with snow on the ground? (snow depth from Open-Meteo)")
+            }
+
+            OutlinedTextField(value = windFactor, modifier = Modifier.fillMaxWidth(),
+                onValueChange = { windFactor = it },
+                label = { Text("Wind factor") },
+                supportingText = { Text("How much of the weather service's wind to use: 0.65 by default (forecast wind is only a rough guide to the wind you meet), up to 1 to trust it fully, 0 to ignore wind. 0–1.5.") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = !isforcepower, onCheckedChange = {
                     isforcepower = !it
                 })
@@ -165,6 +208,12 @@ fun DetailScreen(isCreating: Boolean, configdata: ConfigData, onSubmit: (updated
                 })
                 Spacer(modifier = Modifier.width(10.dp))
                 Text("Auto-calibrate from coasting? (needs cadence and wheel speed sensors)")
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = logMotion, onCheckedChange = { logMotion = it })
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Record the Karoo's motion sensor in ride files? (for tuning; doesn't change power)")
             }
 
             if (!isCreating) {

@@ -4,6 +4,7 @@ import android.os.SystemClock
 import com.enderthor.kpower.data.CoastCalibration
 import com.enderthor.kpower.data.ConfigData
 import com.enderthor.kpower.data.GearCheck
+import com.enderthor.kpower.surface.RoadSurface
 import com.enderthor.kpower.extension.toDoubleLocale
 import timber.log.Timber
 
@@ -15,7 +16,12 @@ data class PowerInputs(
     val cadenceSourceId: String? = null,
     val slope: Double,           // rise / run
     val elevation: Double,       // m
-    val headwind: Double,        // m/s
+    val headwind: Double,        // m/s, from the weather (10 m height); scaled by the config's wind factor
+    val surfaceFactor: Double? = null, // from the offline map; null = the config's surface
+    val elevationStreaming: Boolean = true, // false while [elevation] is the stream monitor's placeholder
+    val airTemperatureC: Double? = null,    // weather; null = standard atmosphere
+    val seaLevelPressurePa: Double? = null, // weather, reduced to sea level
+    val snowDepth: Double? = null,          // m on the ground, from the weather
 )
 
 /** The rider, bike and what has been learned about them */
@@ -37,6 +43,7 @@ class PowerPipeline(now: () -> Long = SystemClock::elapsedRealtime) {
 
     private val accelerationTracker = AccelerationTracker(now = now)
     private val coastTracker = AccelerationTracker(AccelerationTracker.COAST_WINDOW_MS, now)
+    private val climbRateTracker = ClimbRateTracker(now = now)
     val coastDetector = CoastDetector(now)
 
     @Volatile private var gearDetector: GearDetector? = null
@@ -86,22 +93,33 @@ class PowerPipeline(now: () -> Long = SystemClock::elapsedRealtime) {
         val cdA = calibration?.cdA ?: (config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale())
         val crr = config.rollingResistanceCoefficient.toDoubleLocale()
 
+        val climbRate = if (inputs.elevationStreaming) climbRateTracker.update(inputs.elevation) else { climbRateTracker.reset(); null }
+        val slope = effectiveSlope(gravitySlope(inputs.slope, climbRate, speed))
+        val headwind = inputs.headwind * config.windFactorValue
+        val baseSurfaceFactor = inputs.surfaceFactor ?: config.surface.factor
+        val snow = if (config.snowAdjust) snowFactor(inputs.snowDepth, baseSurfaceFactor) else 1.0
+        val surfaceFactor = baseSurfaceFactor * snow
+        // Snow changes rolling resistance from minute to minute, so coasting then isn't learned
+        val coastingSurfaceOk = snow == 1.0 && (!config.autoSurface || inputs.surfaceFactor == RoadSurface.PAVED.factor)
         if (config.autoCalibrate) {
             coastDetector.update(
                 CoastDetector.Input(
                     configKey = config.calibrationKey,
-                    useCadenceSensor = config.useCadenceSensor,
+                    // Off paved roads the segment ends, as if pedalling
+                    useCadenceSensor = config.useCadenceSensor && coastingSurfaceOk,
                     cadence = inputs.cadence,
                     isWheelSpeed = isWheelSpeed,
                     speed = speed,
                     meanSpeed = coastTracker.windowMeanSpeed,
                     acceleration = coastAcceleration,
-                    slope = inputs.slope,
-                    headwind = inputs.headwind,
+                    slope = slope,
+                    headwind = headwind,
                     elevation = inputs.elevation,
+                    airTemperatureC = inputs.airTemperatureC,
+                    seaLevelPressurePa = inputs.seaLevelPressurePa,
                     totalMass = totalMass,
                     cdA = cdA,
-                    crrEff = crr * config.surface.factor,
+                    crrEff = crr * config.coastSurfaceFactor,
                 )
             )
         }
@@ -114,24 +132,73 @@ class PowerPipeline(now: () -> Long = SystemClock::elapsedRealtime) {
         val minPower = if (drivingGear) config.pedallingFloor.toDoubleLocale() else 0.0
 
         return CyclingWattageEstimator(
-            slope = inputs.slope,
+            slope = slope,
             totalMass = totalMass,
             rollingResistanceCoefficient = crr,
             // A learned CdA replaces Cd × frontal area
             dragCoefficient = calibration?.cdA ?: config.dragCoefficient.toDoubleLocale(),
             speed = speed,
             elevation = inputs.elevation,
-            windSpeed = inputs.headwind,
+            windSpeed = headwind,
             powerLoss = config.powerLoss.toDoubleLocale() / 100,
             frontalArea = if (calibration != null) 1.0 else config.frontalArea.toDoubleLocale(),
             ftp = config.ftp.toDoubleLocale(),
             cadence = cadence,
-            surface = config.surface.factor,
+            surface = surfaceFactor,
             // Without a cadence reading, power is always calculated
             isforcepower = !config.useCadenceSensor || !cadenceStreaming,
             acceleration = acceleration,
             minPower = minPower,
+            airTemperatureC = inputs.airTemperatureC,
+            seaLevelPressurePa = inputs.seaLevelPressurePa,
         ).calculateCyclingWattage()
+    }
+
+    companion object {
+        /**
+         * A descent's gravity term is large next to the rider's power, and the altitude behind it lags
+         * and is noisy: replayed rides often read 0 W while pedalling on descents. Taking 80%
+         * of a negative slope matched a lag-free grade best; climbs are left as they are. Kept with
+         * gravity from the climb rate, where an energy check on descents can't see braking.
+         */
+        const val NEGATIVE_GRADE_FACTOR = 0.8
+
+        fun effectiveSlope(slope: Double) = if (slope < 0) slope * NEGATIVE_GRADE_FACTOR else slope
+
+        /**
+         * The slope gravity is worked out from: rate of climb / speed, so gravity's power is m·g·climb
+         * rate. The Karoo's grade is used until the altitude window has filled and when barely moving.
+         */
+        fun gravitySlope(karooSlope: Double, climbRate: Double?, speed: Double): Double =
+            if (climbRate == null || speed < MIN_CLIMB_RATE_SPEED) karooSlope
+            else (climbRate / speed).coerceIn(-MAX_SLOPE, MAX_SLOPE)
+
+        /**
+         * Extra rolling resistance with snow on the ground. The weather's snow depth is for open ground:
+         * cleared roads can be bare under it, unpaved paths usually aren't cleared. So paved surfaces
+         * (factor up to [PAVED_MAX_FACTOR]) get a fixed [SNOW_PAVED] for leftover snow and slush, unpaved
+         * ones rise with depth up to (1 + [SNOW_UNPAVED_MAX]) at [SNOW_FULL_DEPTH]. Soft ground (sand,
+         * grass) is already slow and is left alone. Packed snow rolls roughly 2–3× slower than asphalt and
+         * loose snow more; these are cautious starting values, to tune on winter rides.
+         */
+        fun snowFactor(snowDepth: Double?, surfaceFactor: Double): Double = when {
+            snowDepth == null || snowDepth < SNOW_MIN_DEPTH -> 1.0
+            surfaceFactor >= SOFT_MIN_FACTOR -> 1.0
+            surfaceFactor <= PAVED_MAX_FACTOR -> SNOW_PAVED
+            else -> 1.0 + SNOW_UNPAVED_MAX * minOf(snowDepth, SNOW_FULL_DEPTH) / SNOW_FULL_DEPTH
+        }
+
+        const val SNOW_MIN_DEPTH = 0.01   // m
+        const val SNOW_FULL_DEPTH = 0.10  // m
+        const val SNOW_PAVED = 1.25
+        const val SNOW_UNPAVED_MAX = 1.5
+        const val PAVED_MAX_FACTOR = 0.9
+        const val SOFT_MIN_FACTOR = 2.0
+
+        const val MIN_CLIMB_RATE_SPEED = 1.0 // m/s
+        const val MAX_SLOPE = 0.15
+
+        private const val NO_READING_YET = "\u0000"
     }
 
     /** What the gear detector saw since the last call, with the config it belongs to */
@@ -150,9 +217,5 @@ class PowerPipeline(now: () -> Long = SystemClock::elapsedRealtime) {
             gearDetector = it
             gearDetectorConfig = configId to ratios
         }
-    }
-
-    private companion object {
-        const val NO_READING_YET = "\u0000"
     }
 }

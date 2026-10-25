@@ -9,6 +9,7 @@ import com.enderthor.kpower.vdevice.CyclingWattageEstimator.Companion.DYNAMIC_RO
 import com.enderthor.kpower.vdevice.CyclingWattageEstimator.Companion.GRAVITY
 import com.enderthor.kpower.vdevice.CyclingWattageEstimator.Companion.ROTATING_MASS_KG
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -142,6 +143,17 @@ class CoastCalibrationTest {
         var cal: CoastCalibration? = null
         repeat(100) { cal = CoastFitter.blend(cal, fit, configCdA = 0.9) }
         assertTrue(cal!!.cdA <= 1.0 && cal!!.cdA > 0.9999)
+    }
+
+    @Test
+    fun implausibleFitsAreRejected() {
+        // Entered Cd × Area 0.6: fits far below or above it are coasting bias, not the bike
+        assertTrue(CoastFitter.isPlausible(CoastFitter.Fit(0.55, 100), configCdA = 0.6))
+        assertTrue(CoastFitter.isPlausible(CoastFitter.Fit(0.72, 100), configCdA = 0.6))
+        assertFalse(CoastFitter.isPlausible(CoastFitter.Fit(0.30, 100), configCdA = 0.6))
+        assertFalse(CoastFitter.isPlausible(CoastFitter.Fit(0.85, 100), configCdA = 0.6))
+        // and never outside the absolute range
+        assertFalse(CoastFitter.isPlausible(CoastFitter.Fit(0.28, 100), configCdA = 0.35))
     }
 
     // --- Detector, fed like EstimatedPowerSource does at ~1 Hz ---

@@ -4,4 +4,10 @@
     icon="@drawable/ic_power_hr"
     id="kpower"
     scansDevices="true">
+    <DataType
+        description="@string/surface_field_desc"
+        displayName="@string/surface_field"
+        graphical="true"
+        icon="@drawable/ic_power_hr"
+        typeId="surface" />
 </ExtensionInfo>

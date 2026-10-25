@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -64,5 +65,13 @@ class StreamMonitorTest {
         karoo.value = speed(4.0)
         advanceTimeBy(3_000); runCurrent()
         assertEquals(speed(4.0), seen.last())
+    }
+
+    @Test
+    fun thePlaceholderIsNotAReading() = runTest {
+        val first = monitoredStream("altitude", { kotlinx.coroutines.flow.emptyFlow() }).first()
+        assertTrue(first is StreamState.Streaming && first.dataPoint.singleValue == 0.0)
+        assertTrue(!first.isRealReading())
+        assertTrue(speed(0.0).isRealReading())
     }
 }

@@ -7,12 +7,12 @@ import android.os.SystemClock
  *
  * Uses the least-squares slope of speed over the last [windowMs] so 1 Hz quantization and
  * sensor jitter don't turn into power spikes. Each speed is first replaced by the median of the
- * last three, so a one-second dropout isn't read as braking and then
+ * last three, so a reading that drops for one second and comes back isn't read as braking and then
  * sprinting. Sample at every calculation (not only when speed changes): the speed stream drops
  * repeated values, and a constant speed must give a slope of 0.
  *
  * A wheel sensor reads 0 until the wheel turns fast enough, then jumps to the riding speed
- * (0 → 12 km/h in one second at a junction), and while standing still the readings can be
+ * (0 → about 12 km/h in one second), and while standing still the readings can be
  * too sparse for the window to remember the stop. So when the bike moves off from a standstill,
  * the seconds the sensor couldn't see are filled with a [START_ACCELERATION] ramp from zero.
  * Only for speeds such a jump produces (up to [MAX_START_SPEED]): anything faster after a stop

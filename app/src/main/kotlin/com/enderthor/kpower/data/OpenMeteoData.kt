@@ -12,6 +12,9 @@ data class OpenMeteoData(
     val interval: Int,
     @SerialName("wind_speed_10m") val windSpeed: Double,
     @SerialName("wind_direction_10m") val windDirection: Double,
+    @SerialName("temperature_2m") val temperature: Double? = null, // °C
+    @SerialName("pressure_msl") val pressureMsl: Double? = null,   // hPa, reduced to sea level
+    @SerialName("snow_depth") val snowDepth: Double? = null,       // m
 )
 
 
@@ -19,6 +22,12 @@ data class OpenMeteoData(
 data class OpenWeatherData(
     @SerialName("speed") val speed: Double,
     @SerialName("deg") val deg: Double,
+)
+
+@Serializable
+data class OpenWeatherMain(
+    @SerialName("temp") val temp: Double,         // K (no units parameter in the request)
+    @SerialName("pressure") val pressure: Double, // hPa at sea level
 )
 
 @Serializable
@@ -41,6 +50,7 @@ data class OpenMeteoCurrentWeatherResponse(
 @Serializable
 data class OpenWeatherCurrentWeatherResponse(
     val wind: OpenWeatherData,
+    val main: OpenWeatherMain? = null,
     @SerialName("dt") val time: Long,
     val coord: OpenWeatherCoord,
 )

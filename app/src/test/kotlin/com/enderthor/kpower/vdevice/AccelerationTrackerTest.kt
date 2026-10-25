@@ -48,7 +48,7 @@ class AccelerationTrackerTest {
 
     @Test
     fun movingOffAssumesABriskStart() {
-        // Dense readings while stopped, then the sensor jumps to 3.2 m/s (12 km/h)
+        // Dense readings while stopped, then the sensor jumps to 3.3 m/s (12 km/h)
         for (i in 0..19) sample(i * 1000L, 0.0)
         sample(20_000, 3.3)
         assertEquals(AccelerationTracker.START_ACCELERATION, sample(21_000, 3.3), 0.05)
@@ -88,7 +88,7 @@ class AccelerationTrackerTest {
 
     @Test
     fun singleSampleDropoutIsIgnored() {
-        // a one-second drop in the reading used to read as hard braking and then a sprint
+        // A reading that drops for one second used to read as hard braking and then a sprint
         for (i in 0..5) sample(i * 1000L, 4.0)
         assertEquals(0.0, sample(6000, 2.2), 1e-9)
         assertEquals(0.0, sample(7000, 4.0), 1e-9)

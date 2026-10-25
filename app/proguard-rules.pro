@@ -102,3 +102,6 @@
 -keepclassmembers class * {
     @androidx.compose.** *;
 }
+# Offline map reader
+-keep class org.mapsforge.** { *; }
+-dontwarn org.mapsforge.**

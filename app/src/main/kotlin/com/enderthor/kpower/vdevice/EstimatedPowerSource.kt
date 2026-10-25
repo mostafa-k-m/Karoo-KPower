@@ -11,10 +11,12 @@ import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
 import com.enderthor.kpower.data.CoastCalibration
 import com.enderthor.kpower.data.ConfigData
+import com.enderthor.kpower.data.OpenMeteoCurrentWeatherResponse
 import com.enderthor.kpower.data.GearCheck
 import com.enderthor.kpower.data.RealKarooValues
 import com.enderthor.kpower.data.previewConfigData
 import com.enderthor.kpower.extension.*
+import com.enderthor.kpower.surface.SurfaceTracker
 
 
 class EstimatedPowerSource(
@@ -94,6 +96,17 @@ class EstimatedPowerSource(
                         initialValue = emptyMap()
                     )
 
+                // Weather for air density and snow; the Karoo's own temperature (inside the warm unit,
+                // a few °C high) only when the weather has none
+                val weatherFlow = context.streamCurrentWeatherData()
+                    .map<OpenMeteoCurrentWeatherResponse, OpenMeteoCurrentWeatherResponse?> { it }
+                    .catch { e -> Timber.e(e, "Error loading weather"); emit(null) }
+                    .stateIn(scope = scope, started = SharingStarted.Eagerly, initialValue = null)
+                val karooTemperatureFlow = karooSystem.streamDataMonitorFlow(DataType.Type.TEMPERATURE, noCheck = true)
+                    .map { s -> (s as? StreamState.Streaming)?.dataPoint?.singleValue }
+                    .catch { emit(null) }
+                    .stateIn(scope = scope, started = SharingStarted.Eagerly, initialValue = null)
+
                 val powerConfigFlow = context.loadPreferencesFlow()
                     .catch { e ->
                         Timber.e(e, "Error loading power configs")
@@ -172,7 +185,13 @@ class EstimatedPowerSource(
                                     cadenceSourceId = cadence?.dataPoint?.sourceId,
                                     slope = karooValues.slope.getValueOrDefault() / 100,
                                     elevation = karooValues.elevation.getValueOrDefault() * factorElevation,
+                                    elevationStreaming = karooValues.elevation?.isRealReading() == true,
                                     headwind = karooValues.headwind.getValueOrDefault(),
+                                    surfaceFactor = SurfaceTracker.state.value.factor,
+                                    airTemperatureC = weatherFlow.value?.current?.temperature
+                                        ?: karooTemperatureFlow.value?.minus(KAROO_TEMPERATURE_BIAS_C),
+                                    seaLevelPressurePa = weatherFlow.value?.current?.pressureMsl?.times(100.0),
+                                    snowDepth = weatherFlow.value?.current?.snowDepth,
                                 ),
                                 PowerSetup(
                                     config = configs[0],
@@ -235,18 +254,20 @@ class EstimatedPowerSource(
             val key = config.calibrationKey
             val samples = context.loadPendingCoastSamples(key) + batch.samples
             val crr = config.rollingResistanceCoefficient.toDoubleLocale()
-            val fit = CoastFitter.fit(samples, crrEff = crr * config.surface.factor)
+            val fit = CoastFitter.fit(samples, crrEff = crr * config.coastSurfaceFactor)
             if (fit == null) {
                 Timber.i("Coast calibration: ${samples.size} samples, not enough for a fit yet")
                 savePendingCoastSamples(context, key, samples.takeLast(MAX_PENDING_SAMPLES))
                 return
             }
 
-            val updated = CoastFitter.blend(
-                context.loadCalibrationFlow().first()[key],
-                fit,
-                configCdA = config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale(),
-            )
+            val configCdA = config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale()
+            if (!CoastFitter.isPlausible(fit, configCdA)) {
+                Timber.i("Coast calibration: fit CdA ${fit.cdA} from ${fit.samples} samples is not plausible next to $configCdA, dropped")
+                savePendingCoastSamples(context, key, emptyList())
+                return
+            }
+            val updated = CoastFitter.blend(context.loadCalibrationFlow().first()[key], fit, configCdA)
             Timber.i("Coast calibration: fit CdA ${fit.cdA} from ${fit.samples}/${samples.size} samples -> $updated")
             saveCalibration(context, key, updated)
             savePendingCoastSamples(context, key, emptyList())
@@ -255,6 +276,8 @@ class EstimatedPowerSource(
 
     companion object {
         private const val MAX_PENDING_SAMPLES = 1000
+        // The Karoo's temperature sensor sits inside the warm unit and reads about this much high
+        private const val KAROO_TEMPERATURE_BIAS_C = 5.0
 
         // Without a speed sensor the Karoo derives speed from GPS, which is too coarse to see deceleration
         fun isWheelSpeedSource(sourceId: String?, speedSensorIds: Set<String>): Boolean =
