@@ -15,6 +15,7 @@ import com.enderthor.kpower.data.GearCheck
 import com.enderthor.kpower.data.RealKarooValues
 import com.enderthor.kpower.data.previewConfigData
 import com.enderthor.kpower.extension.*
+import com.enderthor.kpower.surface.SurfaceTracker
 
 
 class EstimatedPowerSource(
@@ -172,7 +173,9 @@ class EstimatedPowerSource(
                                     cadenceSourceId = cadence?.dataPoint?.sourceId,
                                     slope = karooValues.slope.getValueOrDefault() / 100,
                                     elevation = karooValues.elevation.getValueOrDefault() * factorElevation,
+                                    elevationStreaming = karooValues.elevation?.isRealReading() == true,
                                     headwind = karooValues.headwind.getValueOrDefault(),
+                                    surfaceFactor = SurfaceTracker.state.value.factor,
                                 ),
                                 PowerSetup(
                                     config = configs[0],
@@ -235,18 +238,20 @@ class EstimatedPowerSource(
             val key = config.calibrationKey
             val samples = context.loadPendingCoastSamples(key) + batch.samples
             val crr = config.rollingResistanceCoefficient.toDoubleLocale()
-            val fit = CoastFitter.fit(samples, crrEff = crr * config.surface.factor)
+            val fit = CoastFitter.fit(samples, crrEff = crr * config.coastSurfaceFactor)
             if (fit == null) {
                 Timber.i("Coast calibration: ${samples.size} samples, not enough for a fit yet")
                 savePendingCoastSamples(context, key, samples.takeLast(MAX_PENDING_SAMPLES))
                 return
             }
 
-            val updated = CoastFitter.blend(
-                context.loadCalibrationFlow().first()[key],
-                fit,
-                configCdA = config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale(),
-            )
+            val configCdA = config.dragCoefficient.toDoubleLocale() * config.frontalArea.toDoubleLocale()
+            if (!CoastFitter.isPlausible(fit, configCdA)) {
+                Timber.i("Coast calibration: fit CdA ${fit.cdA} from ${fit.samples} samples is not plausible next to $configCdA, dropped")
+                savePendingCoastSamples(context, key, emptyList())
+                return
+            }
+            val updated = CoastFitter.blend(context.loadCalibrationFlow().first()[key], fit, configCdA)
             Timber.i("Coast calibration: fit CdA ${fit.cdA} from ${fit.samples}/${samples.size} samples -> $updated")
             saveCalibration(context, key, updated)
             savePendingCoastSamples(context, key, emptyList())

@@ -54,6 +54,14 @@ enum class GearHub(val label: String, val ratios: List<Double>) {
 }
 
 
+/**
+ * Share of the weather service's wind that is used. Shelter at handlebar height accounts for part
+ * of it, but mostly it discounts the forecast itself: one hourly value for an area kilometres wide,
+ * its direction often 30–45° off. 0.65 is what the log wind profile gives at handlebar height over
+ * open, low-rise country; fitting heart rate on replayed rides with forecast wind favoured less.
+ */
+const val DEFAULT_WIND_FACTOR = "0.65"
+
 @Serializable
 data class ConfigData(
     val id: Int,
@@ -76,6 +84,12 @@ data class ConfigData(
     val sprockets: String = "",
     val customHubRatios: String = "",
     val pedallingFloor: String = "30",
+    // Road surface from the Karoo's offline map; [surface] is used where the map has no road
+    val autoSurface: Boolean = false,
+    // Share of the weather wind (forecast at 10 m height) that reaches a rider at handlebar height
+    val windFactor: String = DEFAULT_WIND_FACTOR,
+    // Write the accelerometer's per-second means into the ride file, for tuning
+    val logMotion: Boolean = false,
     ) {
     // Stored inverted as isforcepower so configs saved by older versions keep their meaning
     val useCadenceSensor: Boolean get() = !isforcepower
@@ -84,7 +98,16 @@ data class ConfigData(
     // calibration, and entering the old values again brings the old calibration back
     val calibrationKey: String
         get() = listOf(id, bikeMass.toDoubleLocale(), dragCoefficient.toDoubleLocale(), frontalArea.toDoubleLocale(),
-            rollingResistanceCoefficient.toDoubleLocale(), surface.name).joinToString("|")
+            rollingResistanceCoefficient.toDoubleLocale(), if (autoSurface) "AUTO" else surface.name).joinToString("|")
+
+    /** [windFactor] as a number: 0–1.5, the default when it can't be read */
+    val windFactorValue: Double
+        get() = windFactor.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.5)
+            ?: DEFAULT_WIND_FACTOR.toDouble()
+
+    // With the surface from the map, coasting is only learned on paved roads, so one Crr fits all samples
+    val coastSurfaceFactor: Double
+        get() = if (autoSurface) KarooSurface.ASPHALT.factor else surface.factor
 
     /**
      * Wheel turns per crank turn in every gear, or empty when the gearing isn't entered.

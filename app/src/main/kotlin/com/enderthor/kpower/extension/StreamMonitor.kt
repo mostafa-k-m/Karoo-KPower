@@ -29,6 +29,12 @@ import kotlin.time.Duration.Companion.milliseconds
  * minutes, so riding off after a standstill of a minute and a half read 0 W until it woke up.
  * Only real errors back off, at most [WAIT_STREAMS_MEDIUM].
  */
+/** Marks the 0 placeholder, so a reader can tell it from a real 0 (a sea-level altitude) */
+const val PLACEHOLDER_FIELD = "kpower_placeholder"
+
+/** A reading from the Karoo, not [monitoredStream]'s placeholder */
+fun StreamState.isRealReading(): Boolean = this is StreamState.Streaming && PLACEHOLDER_FIELD !in dataPoint.values
+
 @OptIn(FlowPreview::class)
 fun monitoredStream(
     dataTypeID: String,
@@ -38,7 +44,7 @@ fun monitoredStream(
     val initialState = StreamState.Streaming(
         DataPoint(
             dataTypeId = dataTypeID,
-            values = mapOf(DataType.Field.SINGLE to 0.0)
+            values = mapOf(DataType.Field.SINGLE to 0.0, PLACEHOLDER_FIELD to 1.0)
         )
     )
     emit(initialState)

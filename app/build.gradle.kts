@@ -59,6 +59,8 @@ dependencies {
     implementation(libs.androidx.glance.preview)
     implementation(libs.androidx.glance.appwidget.preview)
     implementation(libs.timber)
+    // Reads the Karoo's offline map (Mapsforge format) for the road surface; LGPL-3.0
+    implementation("org.mapsforge:mapsforge-map-reader:0.25.0")
     implementation(libs.androidx.foundation.android)
     implementation(libs.androidx.foundation.layout.android)
     testImplementation("junit:junit:4.13.2")
